@@ -3,7 +3,7 @@
 import { useBuilderStore } from '@/stores/builder-store';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { Plus, GripVertical, Loader2 } from 'lucide-react';
+import { Plus, Loader2 } from 'lucide-react';
 import {
     DndContext,
     closestCenter,
