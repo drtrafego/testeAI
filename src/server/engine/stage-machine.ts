@@ -133,6 +133,12 @@ export class StageMachine {
     private buildAdvancedPrompt(agent: any, currentStage: any, allStages: any[], session: any, context: string[]) {
         const vars = session.variables || {};
         const stageFlow = allStages.map((s, i) => `${i}. ${s.name} (${s.type})`).join('\n');
+        const currentIndex = allStages.findIndex(s => s.id === currentStage.id);
+        const totalStages = allStages.length;
+
+        // Determine if we're near scheduling stage (should explore more)
+        const isNearScheduleStage = currentStage.type === 'diagnosis' ||
+            (currentIndex < totalStages - 1 && allStages[currentIndex + 1]?.type === 'schedule');
 
         return `# IDENTIDADE
 Você é ${agent.displayName || agent.name}, um agente de IA conversacional especializado.
@@ -147,7 +153,7 @@ ${agent.companyProfile ? `\n## CONTEXTO DA EMPRESA\n${agent.companyProfile}` : '
 Você segue um fluxo de estágios automático:
 ${stageFlow}
 
-## ESTÁGIO ATUAL: ${currentStage.name} (${currentStage.type})
+## ESTÁGIO ATUAL: ${currentStage.name} (${currentStage.type}) [${currentIndex + 1}/${totalStages}]
 
 ### INSTRUÇÕES DO ESTÁGIO
 ${currentStage.instructions}
@@ -168,9 +174,29 @@ ${context.length > 0 ? context.join('\n\n---\n\n') : 'Use apenas as instruções
 7. NUNCA diga "Como posso ajudar?" - você já está ajudando, vá direto ao ponto.
 8. Se o usuário pedir para falar com humano, aceite imediatamente.
 
+# TRATAMENTO DE OBJEÇÕES
+${isNearScheduleStage ? `
+⚠️ ATENÇÃO: Você está próximo do estágio de agendamento. ANTES de oferecer agendar:
+- Explore MAIS a dor/necessidade do lead
+- Se houver hesitação ou dúvida, APROFUNDE perguntando:
+  * "O que te fez hesitar sobre isso?"
+  * "Qual seria o cenário ideal pra você?"
+  * "O que te impediria de avançar hoje?"
+- VALIDE as preocupações antes de apresentar soluções
+- Use a base de conhecimento para encontrar argumentos relevantes
+- Se o lead mencionar objeções, consulte @objecoes_<nicho> no cérebro
+- NÃO avance para agendamento enquanto não tiver explorado suficientemente
+` : ''}
+
+Quando detectar objeções comuns:
+- "Está caro" → Reforce VALOR antes de preço, compare com custo de não agir
+- "Vou pensar" → Pergunte: "O que especificamente você gostaria de pensar melhor?"
+- "Não tenho tempo" → Mostre como a solução ECONOMIZA tempo
+- "Já tentei antes" → Pergunte o que não funcionou e mostre a diferença
+
 # RESPOSTA
 Responda à mensagem do usuário seguindo as instruções do estágio atual.
-Seu objetivo é avançar naturalmente para o próximo estágio quando apropriado.`;
+Seu objetivo é avançar naturalmente para o próximo estágio APENAS quando o lead estiver genuinamente pronto.`;
     }
 
     /**

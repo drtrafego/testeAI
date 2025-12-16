@@ -6,12 +6,13 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User as UserIcon, Loader2, RotateCcw } from 'lucide-react';
+import { Send, Bot, User as UserIcon, Loader2, RotateCcw, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 type Message = {
     role: 'user' | 'assistant';
     content: string;
+    timestamp?: Date;
 };
 
 export function TestTab() {
@@ -20,6 +21,7 @@ export function TestTab() {
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [threadId, setThreadId] = useState<string | null>(null);
+    const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -28,13 +30,49 @@ export function TestTab() {
         }
     }, [messages]);
 
+    // Load previous session from localStorage if exists
+    useEffect(() => {
+        if (agent?.id) {
+            const savedSession = localStorage.getItem(`test_session_${agent.id}`);
+            if (savedSession) {
+                try {
+                    const session = JSON.parse(savedSession);
+                    if (session.messages && session.threadId) {
+                        setMessages(session.messages);
+                        setThreadId(session.threadId);
+                        setSessionStartTime(new Date(session.startTime));
+                    }
+                } catch (e) {
+                    console.error('Erro ao carregar sessão anterior:', e);
+                }
+            }
+        }
+    }, [agent?.id]);
+
+    // Save session when messages change
+    useEffect(() => {
+        if (agent?.id && threadId && messages.length > 0) {
+            const session = {
+                messages,
+                threadId,
+                startTime: sessionStartTime || new Date(),
+            };
+            localStorage.setItem(`test_session_${agent.id}`, JSON.stringify(session));
+        }
+    }, [messages, threadId, agent?.id, sessionStartTime]);
+
     async function handleSend() {
         if (!input.trim() || !agent) return;
 
         const userMsg = input.trim();
         setInput('');
-        setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
+        const newUserMessage: Message = { role: 'user', content: userMsg, timestamp: new Date() };
+        setMessages(prev => [...prev, newUserMessage]);
         setIsLoading(true);
+
+        if (!sessionStartTime) {
+            setSessionStartTime(new Date());
+        }
 
         try {
             const res = await fetch('/api/chat', {
@@ -57,9 +95,11 @@ export function TestTab() {
                 setThreadId(data.threadId);
             }
 
-            setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
+            const assistantMessage: Message = { role: 'assistant', content: data.response, timestamp: new Date() };
+            setMessages(prev => [...prev, assistantMessage]);
         } catch (error) {
-            setMessages(prev => [...prev, { role: 'assistant', content: `❌ Erro: ${String(error)}` }]);
+            const errorMessage: Message = { role: 'assistant', content: `❌ Erro: ${String(error)}`, timestamp: new Date() };
+            setMessages(prev => [...prev, errorMessage]);
         } finally {
             setIsLoading(false);
         }
@@ -68,6 +108,10 @@ export function TestTab() {
     function handleReset() {
         setMessages([]);
         setThreadId(null);
+        setSessionStartTime(null);
+        if (agent?.id) {
+            localStorage.removeItem(`test_session_${agent.id}`);
+        }
     }
 
     return (
@@ -148,14 +192,49 @@ export function TestTab() {
                 <CardHeader className="border-b py-3">
                     <CardTitle className="text-sm font-medium">Debug Sessão</CardTitle>
                 </CardHeader>
-                <CardContent className="p-4 space-y-4 overflow-auto">
+                <CardContent className="p-4 space-y-4 overflow-auto flex-1">
                     <div>
                         <label className="text-xs font-semibold text-muted-foreground uppercase">Thread ID</label>
-                        <div className="text-xs font-mono bg-muted p-1 rounded truncate">{threadId || '-'}</div>
+                        <div className="text-xs font-mono bg-muted p-2 rounded flex items-center justify-between gap-2">
+                            <span className="truncate">{threadId || 'Nenhuma thread ativa'}</span>
+                            {threadId && (
+                                <a
+                                    href={`/dashboard/threads/${threadId}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-primary hover:underline flex items-center gap-1"
+                                >
+                                    <ExternalLink className="h-3 w-3" />
+                                </a>
+                            )}
+                        </div>
                     </div>
-                    {/* Aqui poderíamos mostrar o estágio atual puxando da API tbm se quiséssemos */}
-                    <div className="text-xs text-muted-foreground">
-                        O painel de debug mostrará variáveis coletadas e estágio atual em uma atualização futura.
+
+                    <div>
+                        <label className="text-xs font-semibold text-muted-foreground uppercase">Mensagens</label>
+                        <div className="text-xs font-mono bg-muted p-2 rounded">
+                            {messages.length} mensagem(ns)
+                        </div>
+                    </div>
+
+                    {sessionStartTime && (
+                        <div>
+                            <label className="text-xs font-semibold text-muted-foreground uppercase">Sessão Iniciada</label>
+                            <div className="text-xs font-mono bg-muted p-2 rounded">
+                                {sessionStartTime.toLocaleTimeString('pt-BR')}
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="border-t pt-4 mt-4">
+                        <p className="text-xs text-muted-foreground">
+                            💡 As conversas de teste são salvas localmente e persistem entre recarregamentos.
+                        </p>
+                        {threadId && (
+                            <p className="text-xs text-muted-foreground mt-2">
+                                Clique no ícone ao lado do Thread ID para ver a conversa completa na seção de Threads.
+                            </p>
+                        )}
                     </div>
                 </CardContent>
             </Card>

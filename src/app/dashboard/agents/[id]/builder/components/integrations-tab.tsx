@@ -20,7 +20,7 @@ export function IntegrationsTab() {
     }, [agent]);
 
     function handleConnectGoogle() {
-        window.location.href = '/api/integrations/google/connect'; // Backend endpoint for OAuth
+        window.location.href = '/api/auth/google'; // Rota correta para OAuth do Google
     }
 
     return (

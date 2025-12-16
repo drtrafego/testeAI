@@ -8,9 +8,11 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { updateAgentAction } from '@/server/actions/agents';
-import { useState } from 'react';
-import { Loader2, Save, CheckCircle2, Cpu } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Loader2, Save, CheckCircle2, Cpu, AlertTriangle } from 'lucide-react';
+import { AGENT_TYPES, getAgentPromptTemplate, type AgentType } from '@/lib/agent-prompts';
 
 // LLM Provider and Model configurations
 const LLM_PROVIDERS = {
@@ -51,6 +53,18 @@ export function PersonalityTab() {
     const [isSaving, setIsSaving] = useState(false);
     const [saveSuccess, setSaveSuccess] = useState(false);
 
+    // State for agent type change confirmation
+    const [hasInitialType, setHasInitialType] = useState(false);
+    const [showTypeChangeDialog, setShowTypeChangeDialog] = useState(false);
+    const [pendingTypeChange, setPendingTypeChange] = useState<AgentType | null>(null);
+
+    // Track if agent already had a type selected
+    useEffect(() => {
+        if (agent?.personality && agent.personality !== 'custom') {
+            setHasInitialType(true);
+        }
+    }, [agent?.id]);
+
     if (!agent) return null;
 
     // Extract provider and model from modelConfig
@@ -76,6 +90,48 @@ export function PersonalityTab() {
                 model,
             }
         });
+    }
+
+    // Handle agent type change with confirmation
+    function handleAgentTypeChange(newType: string) {
+        const agentType = newType as AgentType;
+
+        // If already has a type and trying to change, show confirmation
+        if (hasInitialType && agent.personality !== 'custom' && newType !== agent.personality) {
+            setPendingTypeChange(agentType);
+            setShowTypeChangeDialog(true);
+            return;
+        }
+
+        applyAgentTypeChange(agentType);
+    }
+
+    function applyAgentTypeChange(agentType: AgentType) {
+        const promptTemplate = getAgentPromptTemplate(agentType);
+
+        updateAgent({
+            personality: agentType,
+            // Only update prompt if template exists and prompt is empty or user confirms
+            ...(promptTemplate && (!agent.systemPrompt || agent.systemPrompt.length < 100) ? {
+                systemPrompt: promptTemplate
+            } : {})
+        });
+
+        setHasInitialType(true);
+        setShowTypeChangeDialog(false);
+        setPendingTypeChange(null);
+    }
+
+    function confirmTypeChangeWithPrompt() {
+        if (pendingTypeChange) {
+            const promptTemplate = getAgentPromptTemplate(pendingTypeChange);
+            updateAgent({
+                personality: pendingTypeChange,
+                systemPrompt: promptTemplate
+            });
+            setShowTypeChangeDialog(false);
+            setPendingTypeChange(null);
+        }
     }
 
     async function handleSave() {
@@ -141,21 +197,50 @@ export function PersonalityTab() {
                     <div className="space-y-2">
                         <Label>Tipo de Atendimento</Label>
                         <Select
-                            value={agent.personality || 'atendimento'}
-                            onValueChange={(v) => updateAgent({ personality: v })}
+                            value={agent.personality || 'custom'}
+                            onValueChange={handleAgentTypeChange}
                         >
                             <SelectTrigger>
-                                <SelectValue placeholder="Escolha o foco do agente" />
+                                <SelectValue placeholder="Escolha o tipo do agente" />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="atendimento">🎧 Atendimento ao Cliente</SelectItem>
-                                <SelectItem value="vendas">💼 Vendas e Prospecção</SelectItem>
-                                <SelectItem value="suporte">🛠️ Suporte Técnico</SelectItem>
-                                <SelectItem value="agendamento">📅 Agendamento</SelectItem>
-                                <SelectItem value="informativo">📚 Informativo (FAQ)</SelectItem>
-                                <SelectItem value="custom">⚙️ Personalizado</SelectItem>
+                                <SelectItem value="vendas">
+                                    <div className="flex flex-col">
+                                        <span>💼 Agente de Vendas (Closer)</span>
+                                        <span className="text-xs text-muted-foreground">Vendedor consultivo de alta performance</span>
+                                    </div>
+                                </SelectItem>
+                                <SelectItem value="sdr">
+                                    <div className="flex flex-col">
+                                        <span>🎯 SDR Qualificador de Leads</span>
+                                        <span className="text-xs text-muted-foreground">Qualificação estratégica para alto ticket</span>
+                                    </div>
+                                </SelectItem>
+                                <SelectItem value="low_ticket">
+                                    <div className="flex flex-col">
+                                        <span>⚡ Vendas Low Ticket</span>
+                                        <span className="text-xs text-muted-foreground">Vendas rápidas e diretas</span>
+                                    </div>
+                                </SelectItem>
+                                <SelectItem value="secretaria">
+                                    <div className="flex flex-col">
+                                        <span>📅 Secretária + Agendamento</span>
+                                        <span className="text-xs text-muted-foreground">SDR + Secretária com demonstração</span>
+                                    </div>
+                                </SelectItem>
+                                <SelectItem value="custom">
+                                    <div className="flex flex-col">
+                                        <span>⚙️ Personalizado</span>
+                                        <span className="text-xs text-muted-foreground">Crie seu próprio prompt</span>
+                                    </div>
+                                </SelectItem>
                             </SelectContent>
                         </Select>
+                        {agent.personality && agent.personality !== 'custom' && (
+                            <p className="text-xs text-muted-foreground">
+                                💡 O prompt pré-configurado foi carregado. Personalize os campos marcados com [PREENCHER].
+                            </p>
+                        )}
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
@@ -324,6 +409,44 @@ export function PersonalityTab() {
                     Salvar Alterações
                 </Button>
             </div>
+
+            {/* Dialog de confirmação para mudança de tipo */}
+            <Dialog open={showTypeChangeDialog} onOpenChange={setShowTypeChangeDialog}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <AlertTriangle className="h-5 w-5 text-amber-500" />
+                            Confirmar Alteração de Tipo
+                        </DialogTitle>
+                        <DialogDescription>
+                            Você já tem um tipo de agente configurado. Ao mudar para
+                            <strong> {pendingTypeChange && AGENT_TYPES[pendingTypeChange]?.label}</strong>,
+                            o System Prompt atual será substituído pelo template pré-configurado.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg text-sm text-amber-800">
+                        <p><strong>⚠️ Atenção:</strong> Esta ação irá sobrescrever seu prompt atual.</p>
+                        <p className="mt-1">Você pode optar por manter seu prompt e apenas mudar o tipo.</p>
+                    </div>
+                    <DialogFooter className="flex gap-2 sm:gap-0">
+                        <Button
+                            variant="outline"
+                            onClick={() => {
+                                if (pendingTypeChange) {
+                                    updateAgent({ personality: pendingTypeChange });
+                                }
+                                setShowTypeChangeDialog(false);
+                                setPendingTypeChange(null);
+                            }}
+                        >
+                            Manter Meu Prompt
+                        </Button>
+                        <Button onClick={confirmTypeChangeWithPrompt}>
+                            Usar Novo Template
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
