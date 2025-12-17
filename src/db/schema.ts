@@ -149,13 +149,23 @@ export const agents = pgTable('agents', {
     systemPrompt: text('system_prompt').notNull(),
 
     // Configuração do Modelo (JSON)
-    // Estrutura: { model: string, temperature: number, maxTokens: number }
+    // Estrutura: { model: string, provider: string, temperature: number, maxTokens: number }
     modelConfig: jsonb('model_config').notNull().$type<{
-        model: 'gpt-4o' | 'gpt-4o-mini' | 'gpt-4-turbo';
+        model:
+        | 'gpt-4o'
+        | 'gpt-4o-mini'
+        | 'gpt-4-turbo'
+        | 'claude-3-5-sonnet-20241022'
+        | 'claude-3-haiku-20240307'
+        | 'gemini-2.0-flash'
+        | 'gemini-2.0-pro'
+        | 'gemini-3-0-pro'; // Placeholder - não disponível ainda
+        provider?: 'openai' | 'anthropic' | 'google';
         temperature: number;
         maxTokens: number;
     }>().default({
-        model: 'gpt-4o-mini',
+        model: 'gpt-4o',
+        provider: 'openai',
         temperature: 0.7,
         maxTokens: 1024,
     }),

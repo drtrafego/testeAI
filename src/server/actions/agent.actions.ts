@@ -19,7 +19,17 @@ const createAgentSchema = z.object({
     description: z.string().optional(),
     systemPrompt: z.string().min(10, 'System Prompt deve ter pelo menos 10 caracteres'),
     modelConfig: z.object({
-        model: z.enum(['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo']),
+        model: z.enum([
+            'gpt-4o',
+            'gpt-4o-mini',
+            'gpt-4-turbo',
+            'claude-3-5-sonnet-20241022',
+            'claude-3-haiku-20240307',
+            'gemini-2.0-flash',
+            'gemini-2.0-pro',
+            'gemini-3-0-pro',
+        ]),
+        provider: z.enum(['openai', 'anthropic', 'google']).optional(),
         temperature: z.number().min(0).max(1),
         maxTokens: z.number().min(100).max(8192),
     }).optional(),

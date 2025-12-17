@@ -13,6 +13,7 @@ import { anthropic } from '@ai-sdk/anthropic';
 import { BrainService } from '@/lib/ai/brain';
 import { GoogleCalendarService } from '@/server/integrations/google-calendar';
 import { GoogleSheetsService } from '@/server/integrations/google-sheets';
+import { formatContextWithXml, KNOWLEDGE_GUARDRAILS } from '@/server/services/knowledge-service';
 
 const brain = new BrainService();
 const calendar = new GoogleCalendarService();
@@ -161,8 +162,10 @@ ${currentStage.instructions}
 # INFORMAÇÕES COLETADAS
 ${Object.keys(vars).length > 0 ? JSON.stringify(vars, null, 2) : 'Nenhuma informação coletada ainda.'}
 
-# BASE DE CONHECIMENTO (RAG)
-${context.length > 0 ? context.join('\n\n---\n\n') : 'Use apenas as instruções do estágio.'}
+# BASE DE CONHECIMENTO
+${context.length > 0 ? formatContextWithXml(context) : 'Nenhum contexto adicional disponível.'}
+
+${KNOWLEDGE_GUARDRAILS}
 
 # REGRAS DE OURO
 1. Seja CONVERSACIONAL - não robótico. Responda como um humano real responderia.

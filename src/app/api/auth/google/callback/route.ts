@@ -6,7 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { integrations } from '@/db/schema';
+import { integrations, users } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID!;
@@ -20,6 +20,25 @@ const BASE_URL = process.env.NEXTAUTH_URL || 'http://localhost:3000';
 
 // TODO: Obter do contexto de auth real
 const DEFAULT_USER_ID = process.env.DEFAULT_USER_ID || '00000000-0000-0000-0000-000000000001';
+
+/**
+ * Ensures the default user exists in the database
+ * This prevents FK violation when creating integrations
+ */
+async function ensureDefaultUserExists(userId: string, email?: string): Promise<void> {
+    const existingUser = await db.query.users.findFirst({
+        where: eq(users.id, userId)
+    });
+
+    if (!existingUser) {
+        await db.insert(users).values({
+            id: userId,
+            name: 'Admin',
+            email: email || 'admin@sistema.local',
+        });
+        console.log('[OAuth2] Created default user:', userId);
+    }
+}
 
 export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
@@ -72,6 +91,9 @@ export async function GET(request: NextRequest) {
             expiresAt: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
             email: userInfo.email,
         });
+
+        // Garantir que o usuário existe antes de criar integração (previne FK violation)
+        await ensureDefaultUserExists(DEFAULT_USER_ID, userInfo.email);
 
         // Salvar ou atualizar integração
         const existingIntegration = await db.query.integrations.findFirst({
