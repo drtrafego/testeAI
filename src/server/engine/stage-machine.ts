@@ -90,12 +90,23 @@ export class StageMachine {
         // 5a. DETECÇÃO DE INTENÇÃO DIRETA: Pular para agendamento se lead demonstrar interesse
         const lowerMessage = userMessage.toLowerCase();
         const buyingIntentKeywords = [
-            'quero agendar', 'quero marcar', 'quero contratar', 'quero fazer',
-            'gostaria de agendar', 'posso agendar', 'podemos marcar', 'vamos marcar',
+            // Agendar/Marcar direto
+            'quero agendar', 'quero marcar', 'só marcar', 'só agendar',
+            'queria marcar', 'queria agendar', 'gostaria de marcar', 'gostaria de agendar',
+            'posso agendar', 'posso marcar', 'podemos marcar', 'vamos marcar',
+            'marcar uma reunião', 'marcar uma chamada', 'marcar uma call',
             'agendar uma reunião', 'agendar uma chamada', 'agendar uma call',
-            'quero ver na prática', 'quero uma demonstração', 'quero conhecer',
-            'quando podemos', 'qual horário', 'tem horário',
-            'me interessou', 'tenho interesse', 'quero saber mais sobre preço',
+            'marcar apresentação', 'marcar uma apresentação',
+            // Interesse direto
+            'quero contratar', 'quero fazer', 'quero conhecer',
+            'quero ver na prática', 'quero uma demonstração',
+            'me interessou', 'tenho interesse', 'estou interessado',
+            // Horários
+            'quando podemos', 'qual horário', 'tem horário', 'horário disponível',
+            // Preço/valores
+            'quero saber mais sobre preço', 'quanto custa', 'qual o valor',
+            // Urgência
+            'preciso urgente', 'o mais rápido possível', 'próxima semana',
         ];
 
         const hasBuyingIntent = buyingIntentKeywords.some(kw => lowerMessage.includes(kw));
@@ -292,9 +303,35 @@ export class StageMachine {
         const isNearScheduleStage = currentStage.type === 'diagnosis' ||
             (currentIndex < totalStages - 1 && allStages[currentIndex + 1]?.type === 'schedule');
 
+        // Current date info for scheduling
+        const now = new Date();
+        const diasSemana = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+        const diaSemanaAtual = diasSemana[now.getDay()];
+        const dataAtual = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()}`;
+
+        // Calculate next business days
+        const proximosDias: string[] = [];
+        for (let i = 1; i <= 7; i++) {
+            const futureDate = new Date(now);
+            futureDate.setDate(now.getDate() + i);
+            const dayOfWeek = futureDate.getDay();
+            if (dayOfWeek !== 0 && dayOfWeek !== 6) { // Skip weekends
+                const formattedDate = `${futureDate.getDate().toString().padStart(2, '0')}/${(futureDate.getMonth() + 1).toString().padStart(2, '0')}`;
+                const dayName = diasSemana[dayOfWeek];
+                proximosDias.push(`${dayName} ${formattedDate}`);
+                if (proximosDias.length >= 3) break;
+            }
+        }
+
         return `# IDENTIDADE
 Você é ${agent.displayName || agent.name}, um agente de IA conversacional especializado.
 ${agent.companyProfile ? `\n## CONTEXTO DA EMPRESA\n${agent.companyProfile}` : ''}
+
+# DATA E HORA ATUAL
+- Hoje é: ${diaSemanaAtual}, ${dataAtual}
+- Hora atual: ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}
+- Próximos dias úteis disponíveis: ${proximosDias.join(', ')}
+- NUNCA ofereça sábado ou domingo para reuniões
 
 # TOM DE VOZ
 - Estilo: ${agent.tone || 'amigável'} e ${agent.personality || 'profissional'}
