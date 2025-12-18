@@ -212,6 +212,70 @@ export class StageMachine {
                 .where(eq(sessions.id, session.id));
         }
 
+        // 11. AGENDAMENTO AUTOMÁTICO: Se estamos no estágio de schedule e temos os dados
+        const finalVars = { ...(session?.variables as object || {}), ...analysisResult.extractedVars };
+        if (activeStage.type === 'schedule' || currentStage.type === 'schedule') {
+            const hasSchedulingData = finalVars.email && (finalVars.data_reuniao || finalVars.horario_reuniao);
+
+            if (hasSchedulingData && !finalVars.meetingCreated) {
+                try {
+                    console.log('[StageMachine] 📅 Tentando agendar reunião...', finalVars);
+
+                    // Parse date from Brazilian format (DD/MM) to ISO format
+                    const dataStr = String(finalVars.data_reuniao || '');
+                    const horarioStr = String(finalVars.horario_reuniao || '10:00');
+                    const nome = String(finalVars.nome || 'Lead');
+                    const attendeeEmail = String(finalVars.email || '');
+
+                    // Extract day and month
+                    const dateMatch = dataStr.match(/(\d{1,2})[\/\-](\d{1,2})/);
+                    if (dateMatch && attendeeEmail) {
+                        const day = parseInt(dateMatch[1]);
+                        const month = parseInt(dateMatch[2]) - 1; // JS months are 0-indexed
+                        const year = new Date().getFullYear();
+
+                        // Adjust year if month is before current month
+                        const currentMonth = new Date().getMonth();
+                        const adjustedYear = month < currentMonth ? year + 1 : year;
+
+                        // Extract time
+                        const timeMatch = horarioStr.match(/(\d{1,2})(?::(\d{2}))?/);
+                        const hours = timeMatch ? parseInt(timeMatch[1]) : 10;
+                        const minutes = timeMatch && timeMatch[2] ? parseInt(timeMatch[2]) : 0;
+
+                        // Create Date objects
+                        const startDate = new Date(adjustedYear, month, day, hours, minutes, 0);
+                        const endDate = new Date(startDate.getTime() + 45 * 60 * 1000); // +45 min
+
+                        // Create meeting
+                        const meetingTitle = `IA Agent - ${agent.name} + ${nome}`;
+
+                        const result = await calendar.createEvent(agent.userId, {
+                            summary: meetingTitle,
+                            description: `Reunião agendada via chat.\nÁrea: ${finalVars.area || 'N/A'}\nDesafio: ${finalVars.desafio || 'N/A'}`,
+                            start: startDate,
+                            end: endDate,
+                            attendeeEmail: attendeeEmail,
+                        });
+
+                        if (result.id) {
+                            console.log('[StageMachine] ✅ Reunião criada com sucesso!', result.id);
+                            // Salvar evento ID na sessão
+                            await db.update(sessions)
+                                .set({
+                                    variables: { ...finalVars, meetingCreated: true, eventId: result.id, eventLink: result.link }
+                                })
+                                .where(eq(sessions.id, session!.id));
+                        } else {
+                            console.error('[StageMachine] ❌ Falha ao criar reunião - sem ID retornado');
+                        }
+                    }
+                } catch (calError) {
+                    console.error('[StageMachine] ❌ Erro no agendamento:', calError);
+                }
+            }
+        }
+
         return fullResponse;
     }
 
