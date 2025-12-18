@@ -282,6 +282,7 @@ export class StageMachine {
                     let calendarUserId = agent.userId;
 
                     // Verificar se o agent.userId tem integração Google
+                    console.log(`[StageMachine] 🔍 Buscando integração para agent.userId: ${agent.userId}, provider: google`);
                     const agentIntegration = await db.query.integrations.findFirst({
                         where: and(eq(integrations.userId, agent.userId), eq(integrations.provider, 'google'))
                     });
@@ -303,7 +304,8 @@ export class StageMachine {
                             console.log(`[StageMachine] 📅 Usando integração Google de usuário real: ${calendarUserId}`);
                         } else {
                             console.error('[StageMachine] ❌ Nenhuma integração Google de usuário real encontrada');
-                            throw new Error('Nenhuma integração Google configurada por um usuário real');
+                            // Throw specific error to be caught below
+                            throw new Error('CONFIG_ERROR_NO_INTEGRATION');
                         }
                     }
 
@@ -356,8 +358,15 @@ export class StageMachine {
                             console.error('[StageMachine] ❌ Falha ao criar reunião - sem ID retornado');
                         }
                     }
-                } catch (calError) {
+                } catch (calError: any) {
                     console.error('[StageMachine] ❌ Erro no agendamento:', calError);
+
+                    // Graceful fallback: Inform user about the error
+                    if (calError.message === 'CONFIG_ERROR_NO_INTEGRATION') {
+                        fullResponse += "\n\n(⚠️ Nota do Sistema: Não encontrei uma agenda Google conectada para realizar o agendamento. Por favor, verifique a página de integrações.)";
+                    } else {
+                        fullResponse += "\n\n(⚠️ Nota do Sistema: Tive um problema técnico ao tentar acessar a agenda. Podemos tentar novamente em instantes?)";
+                    }
                 }
             }
         }
@@ -440,12 +449,13 @@ ${context.length > 0 ? formatContextWithXml(context) : 'Nenhum contexto adiciona
 
 ${KNOWLEDGE_GUARDRAILS}
 
-# REGRAS DE INTELIGÊNCIA
-1. **ADAPTE-SE AO LEAD**: Se ele já chegou decidido, NÃO faça perguntas desnecessárias. Vá direto ao ponto.
-2. **PULE ESTÁGIOS QUANDO APROPRIADO**: Se o lead diz "quero marcar uma reunião", pule direto para agendamento. Não force perguntas intermediárias.
-3. **O MÍNIMO NECESSÁRIO**: Para agendar, você só precisa de: NOME, EMAIL, DATA/HORÁRIO. Se tiver esses dados, agende imediatamente.
-4. **DETECTE A URGÊNCIA**: Se o lead parece com pressa ou já decidido, seja eficiente e direto.
-5. **NÃO SEJA ROBÓTICO**: Responda como um humano real, não siga scripts cegamente.
+# REGRAS DE INTELIGÊNCIA E FLUIDEZ (PRIORIDADE MÁXIMA)
+### DIRETRIZES CRÍTICAS DE COMPORTAMENTO (PARA EVITAR SER ROBÓTICO):
+1.  **Priorize o Usuário:** O "Objetivo do Estágio Atual" é apenas um guia. Se o usuário mudar de assunto ou fizer uma pergunta direta que está no seu "Cérebro" (Knowledge Base), PAUSE o objetivo e responda o usuário primeiro.
+2.  **Não Repita Perguntas:** Se o usuário já forneceu uma informação (ex: o nome dele no início da conversa), NUNCA pergunte novamente. Use a memória (Variáveis Coletadas).
+3.  **Seja Humano e Direto:** Evite frases prontas de IA ("Entendo", "Compreendo"). Fale como uma pessoa prestativa no WhatsApp. Se o usuário for direto, seja direto.
+4.  **Detecção de Atalho:** Se o usuário disser "Quero agendar agora" e você já tiver os dados necessários (Nome, Email), PULE qualquer script de qualificação e vá direto para a oferta de horários.
+5.  **Adaptação:** Ajuste seu tone ao do usuário. Se ele é breve, seja breve.
 
 # REGRAS DE OURO
 1. Seja CONVERSACIONAL - não robótico. Responda como um humano real responderia.
