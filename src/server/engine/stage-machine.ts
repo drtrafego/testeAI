@@ -242,6 +242,30 @@ export class StageMachine {
                 try {
                     console.log('[StageMachine] 📅 Tentando agendar reunião...', finalVars);
 
+                    // Buscar usuário com integração Google (primeiro tenta agent.userId, depois busca qualquer um)
+                    const { integrations } = await import('@/db/schema');
+                    let calendarUserId = agent.userId;
+
+                    // Verificar se o agent.userId tem integração Google
+                    const agentIntegration = await db.query.integrations.findFirst({
+                        where: and(eq(integrations.userId, agent.userId), eq(integrations.provider, 'google'))
+                    });
+
+                    if (!agentIntegration) {
+                        // Buscar qualquer usuário com integração Google
+                        const anyGoogleIntegration = await db.query.integrations.findFirst({
+                            where: eq(integrations.provider, 'google')
+                        });
+
+                        if (anyGoogleIntegration) {
+                            calendarUserId = anyGoogleIntegration.userId;
+                            console.log(`[StageMachine] 📅 Usando integração Google de outro usuário: ${calendarUserId}`);
+                        } else {
+                            console.error('[StageMachine] ❌ Nenhuma integração Google encontrada no sistema');
+                            throw new Error('Nenhuma integração Google configurada');
+                        }
+                    }
+
                     // Parse date from Brazilian format (DD/MM) to ISO format
                     const dataStr = String(finalVars.data_reuniao || '');
                     const horarioStr = String(finalVars.horario_reuniao || '10:00');
@@ -271,7 +295,7 @@ export class StageMachine {
                         // Create meeting
                         const meetingTitle = `IA Agent - ${agent.name} + ${nome}`;
 
-                        const result = await calendar.createEvent(agent.userId, {
+                        const result = await calendar.createEvent(calendarUserId, {
                             summary: meetingTitle,
                             description: `Reunião agendada via chat.\nÁrea: ${finalVars.area || 'N/A'}\nDesafio: ${finalVars.desafio || 'N/A'}`,
                             start: startDate,
