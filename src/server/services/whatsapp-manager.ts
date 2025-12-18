@@ -10,8 +10,8 @@
  */
 
 import { db } from '@/lib/db';
-import { whatsappInstances, agents } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { whatsappInstances, agents, users } from '@/db/schema';
+import { eq, and } from 'drizzle-orm';
 import { BaileysService } from './baileys.service';
 import { sendWhatsAppMessage as sendMetaMessage } from './meta-whatsapp.service';
 import { encryptCredential, decryptCredential } from '@/lib/security';
@@ -23,7 +23,9 @@ export type InstanceStatus = 'disconnected' | 'connecting' | 'connected' | 'erro
 
 export interface InstanceInfo {
     id: string;
-    agentId: string;
+    userId?: string;
+    agentId?: string;
+    isMain: boolean;
     connectionType: ConnectionType;
     status: InstanceStatus;
     phoneNumber?: string;
@@ -39,7 +41,59 @@ const baileysInstances = new Map<string, BaileysService>();
 export const instanceEvents = new EventEmitter();
 
 /**
- * Cria uma nova instância WhatsApp para um agente
+ * Cria uma nova instância WhatsApp PRINCIPAL para um usuário
+ */
+export async function createMainWhatsAppInstance(
+    userId: string,
+    connectionType: ConnectionType
+): Promise<{ success: boolean; instanceId?: string; error?: string }> {
+    try {
+        // Verificar se já existe instância principal para este usuário
+        const existing = await db.query.whatsappInstances.findFirst({
+            where: and(
+                eq(whatsappInstances.userId, userId),
+                eq(whatsappInstances.isMain, true)
+            ),
+        });
+
+        if (existing) {
+            // Atualizar tipo de conexão se diferente
+            if (existing.connectionType !== connectionType) {
+                await db.update(whatsappInstances)
+                    .set({
+                        connectionType,
+                        status: 'disconnected',
+                        updatedAt: new Date(),
+                    })
+                    .where(eq(whatsappInstances.id, existing.id));
+            }
+            return { success: true, instanceId: existing.id };
+        }
+
+        // Criar nova instância principal
+        const [newInstance] = await db.insert(whatsappInstances)
+            .values({
+                userId,
+                isMain: true,
+                connectionType,
+                status: 'disconnected',
+            })
+            .returning();
+
+        console.log(`[WhatsApp Manager] Instância principal criada: ${newInstance.id} para usuário ${userId}`);
+
+        return { success: true, instanceId: newInstance.id };
+    } catch (error) {
+        console.error('[WhatsApp Manager] Erro ao criar instância principal:', error);
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Erro desconhecido'
+        };
+    }
+}
+
+/**
+ * Cria uma nova instância WhatsApp para um agente específico
  */
 export async function createWhatsAppInstance(
     agentId: string,
@@ -78,6 +132,7 @@ export async function createWhatsAppInstance(
         const [newInstance] = await db.insert(whatsappInstances)
             .values({
                 agentId,
+                isMain: false,
                 connectionType,
                 status: 'disconnected',
             })
@@ -369,7 +424,9 @@ export async function getInstanceStatus(instanceId: string): Promise<InstanceInf
 
         return {
             id: instance.id,
-            agentId: instance.agentId,
+            userId: instance.userId || undefined,
+            agentId: instance.agentId || undefined,
+            isMain: instance.isMain,
             connectionType: instance.connectionType as ConnectionType,
             status,
             phoneNumber: instance.phoneNumber || undefined,
@@ -397,6 +454,27 @@ export async function getInstanceByAgentId(agentId: string): Promise<InstanceInf
         return getInstanceStatus(instance.id);
     } catch (error) {
         console.error('[WhatsApp Manager] Erro ao buscar por agentId:', error);
+        return null;
+    }
+}
+
+/**
+ * Obtém instância principal de um usuário
+ */
+export async function getMainInstance(userId: string): Promise<InstanceInfo | null> {
+    try {
+        const instance = await db.query.whatsappInstances.findFirst({
+            where: and(
+                eq(whatsappInstances.userId, userId),
+                eq(whatsappInstances.isMain, true)
+            ),
+        });
+
+        if (!instance) return null;
+
+        return getInstanceStatus(instance.id);
+    } catch (error) {
+        console.error('[WhatsApp Manager] Erro ao buscar instância principal:', error);
         return null;
     }
 }

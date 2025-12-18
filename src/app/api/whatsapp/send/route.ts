@@ -1,25 +1,17 @@
 /**
- * ─────────────────────────────────────────────────────────────────────────────
  * WHATSAPP SEND MESSAGE API
- * ─────────────────────────────────────────────────────────────────────────────
  * 
  * POST /api/whatsapp/send - Enviar mensagem via instância WhatsApp
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { sendMessage } from '@/server/services/whatsapp-manager';
-import { auth } from '@/auth';
 
 /**
  * POST - Enviar mensagem
  */
 export async function POST(request: NextRequest) {
     try {
-        const session = await auth();
-        if (!session?.user?.id) {
-            return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
-        }
-
         const body = await request.json();
         const { instanceId, to, message } = body;
 

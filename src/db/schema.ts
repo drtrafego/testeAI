@@ -32,7 +32,7 @@ import {
     uniqueIndex,
     vector,
 } from 'drizzle-orm/pg-core';
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -224,12 +224,21 @@ export const agents = pgTable('agents', {
     // PER-AGENT INTEGRATIONS
     // ─────────────────────────────────────────────────────────────────────────
 
+    // GOOGLE INTEGRATION
     // ID da integração Google específica deste agente (nullable = usa integração principal)
     googleIntegrationId: uuid('google_integration_id')
         .references(() => integrations.id, { onDelete: 'set null' }),
 
     // Se true, usa a integração principal da conta ao invés de uma específica
     useMainGoogleIntegration: boolean('use_main_google_integration').default(true),
+
+    // WHATSAPP INTEGRATION
+    // ID da instância WhatsApp específica deste agente (nullable = usa integração principal)
+    // Nota: Não usamos FK aqui para evitar referência circular com whatsappInstances
+    whatsappInstanceId: uuid('whatsapp_instance_id'),
+
+    // Se true, usa a integração principal da conta ao invés de uma específica
+    useMainWhatsAppIntegration: boolean('use_main_whatsapp_integration').default(true),
 
     // Status
     isActive: boolean('is_active').default(false).notNull(),
@@ -645,17 +654,24 @@ export const whatsappInstanceStatusEnum = pgEnum('whatsapp_instance_status', [
 
 /**
  * Tabela de instâncias WhatsApp.
- * Cada agente pode ter uma instância WhatsApp vinculada.
+ * Suporta dois modos:
+ * 1. Instância principal: userId preenchido, agentId nulo (usada por padrão para todos os agentes do usuário)
+ * 2. Instância por agente: agentId preenchido (cada agente pode ter sua própria conexão)
  * Suporta tanto API Oficial (Meta) quanto conexão via QR Code (Baileys).
  */
 export const whatsappInstances = pgTable('whatsapp_instances', {
     id: uuid('id').defaultRandom().primaryKey(),
 
-    // Relacionamento com agente (1:1)
+    // Relacionamento com usuário (para instâncias principais)
+    userId: uuid('user_id')
+        .references(() => users.id, { onDelete: 'cascade' }),
+
+    // Relacionamento com agente (para instâncias específicas)
     agentId: uuid('agent_id')
-        .notNull()
-        .references(() => agents.id, { onDelete: 'cascade' })
-        .unique(),
+        .references(() => agents.id, { onDelete: 'cascade' }),
+
+    // Flag para indicar se é instância principal
+    isMain: boolean('is_main').default(false).notNull(),
 
     // Tipo de conexão
     connectionType: whatsappConnectionTypeEnum('connection_type').notNull(),
@@ -690,9 +706,13 @@ export const whatsappInstances = pgTable('whatsapp_instances', {
     createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
 }, (table) => ({
+    userIdIdx: index('whatsapp_instances_user_id_idx').on(table.userId),
     agentIdIdx: index('whatsapp_instances_agent_id_idx').on(table.agentId),
     statusIdx: index('whatsapp_instances_status_idx').on(table.status),
     phoneIdx: index('whatsapp_instances_phone_idx').on(table.phoneNumber),
+    mainIdx: uniqueIndex('whatsapp_instances_main_user_idx')
+        .on(table.userId, table.isMain)
+        .where(sql`${table.isMain} = true`), // Apenas uma instância principal por usuário
 }));
 
 // ─────────────────────────────────────────────────────────────────────────────

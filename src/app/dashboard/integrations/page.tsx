@@ -1,9 +1,9 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Header, PageWrapper, PageSection } from '@/components/layout';
-import { Card, CardContent, CardHeader, CardTitle, Button, Badge } from '@/components/ui';
+import { Card, CardContent, CardHeader, CardTitle, CardFooter, Button, Badge } from '@/components/ui';
 import {
     Chrome,
     MessageCircle,
@@ -11,28 +11,30 @@ import {
     X,
     ExternalLink,
     RefreshCw,
-    Settings,
     AlertCircle,
     CheckCircle,
+    QrCode,
+    Wifi,
+    WifiOff,
+    Loader2,
+    Trash2,
 } from 'lucide-react';
+import { WhatsAppQRCode } from '@/components/integrations/WhatsAppQRCode';
 
 /**
  * ─────────────────────────────────────────────────────────────────────────────
- * INTEGRATIONS PAGE - Conectar Google Calendar + WhatsApp
+ * INTEGRATIONS PAGE - Conectar Google Calendar + WhatsApp Principal
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-interface Integration {
+interface WhatsAppInstanceInfo {
     id: string;
-    name: string;
-    description: string;
-    icon: typeof Chrome;
-    color: string;
-    connected: boolean;
-    email?: string;
-    phone?: string;
-    features: { name: string; enabled: boolean }[];
-    connectUrl?: string;
+    agentId: string;
+    connectionType: 'api_oficial' | 'qr_code';
+    status: 'disconnected' | 'connecting' | 'connected' | 'error';
+    phoneNumber?: string;
+    profileName?: string;
+    errorMessage?: string;
 }
 
 function IntegrationsContent() {
@@ -40,6 +42,11 @@ function IntegrationsContent() {
     const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
     const [googleStatus, setGoogleStatus] = useState<{ connected: boolean; email?: string } | null>(null);
     const [loading, setLoading] = useState(true);
+
+    // WhatsApp Main Integration
+    const [whatsappInstance, setWhatsappInstance] = useState<WhatsAppInstanceInfo | null>(null);
+    const [whatsappLoading, setWhatsappLoading] = useState(true);
+    const [showQRCode, setShowQRCode] = useState(false);
 
     // Buscar status real das integrações
     useEffect(() => {
@@ -49,6 +56,10 @@ function IntegrationsContent() {
                 if (res.ok) {
                     const data = await res.json();
                     setGoogleStatus(data.google);
+                    // WhatsApp main instance seria data.whatsapp
+                    if (data.whatsapp) {
+                        setWhatsappInstance(data.whatsapp);
+                    }
                 } else {
                     setGoogleStatus({ connected: false });
                 }
@@ -57,10 +68,31 @@ function IntegrationsContent() {
                 setGoogleStatus({ connected: false });
             } finally {
                 setLoading(false);
+                setWhatsappLoading(false);
             }
         }
         fetchStatus();
     }, []);
+
+    // Buscar instância WhatsApp principal (sem agentId = principal)
+    const fetchMainWhatsAppInstance = useCallback(async () => {
+        setWhatsappLoading(true);
+        try {
+            const res = await fetch('/api/whatsapp/instance?main=true');
+            if (res.ok) {
+                const data = await res.json();
+                setWhatsappInstance(data.instance);
+            }
+        } catch (error) {
+            console.error('Erro ao buscar instância WhatsApp:', error);
+        } finally {
+            setWhatsappLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchMainWhatsAppInstance();
+    }, [fetchMainWhatsAppInstance]);
 
     // Verificar parâmetros de retorno do OAuth
     useEffect(() => {
@@ -69,7 +101,6 @@ function IntegrationsContent() {
 
         if (success === 'google_connected') {
             setNotification({ type: 'success', message: 'Google Calendar conectado com sucesso!' });
-            // Refresh status after connection
             setLoading(true);
             fetch('/api/integrations/status')
                 .then(res => res.json())
@@ -84,7 +115,6 @@ function IntegrationsContent() {
             setNotification({ type: 'error', message: 'Erro ao conectar. Tente novamente.' });
         }
 
-        // Limpar notificação após 5 segundos
         if (success || error) {
             const timer = setTimeout(() => setNotification(null), 5000);
             return () => clearTimeout(timer);
@@ -93,59 +123,26 @@ function IntegrationsContent() {
         return undefined;
     }, [searchParams]);
 
-    const integrations: Integration[] = [
-        {
-            id: 'google',
-            name: 'Google',
-            description: 'Calendar e Sheets',
-            icon: Chrome,
-            color: 'from-red-500 to-yellow-500',
-            connected: googleStatus?.connected ?? false,
-            email: googleStatus?.email,
-            features: [
-                { name: 'Google Calendar', enabled: true },
-                { name: 'Google Sheets', enabled: true },
-            ],
-            connectUrl: '/api/auth/google',
-        },
-        {
-            id: 'meta',
-            name: 'WhatsApp Business',
-            description: 'Meta API',
-            icon: MessageCircle,
-            color: 'from-green-500 to-emerald-500',
-            connected: false,
-            phone: undefined,
-            features: [
-                { name: 'Enviar Mensagens', enabled: true },
-                { name: 'Receber Mensagens', enabled: true },
-                { name: 'Templates', enabled: false },
-            ],
-        },
-    ];
+    const handleConnectGoogle = async () => {
+        try {
+            const response = await fetch('/api/auth/google');
+            const data = await response.json();
 
-    const handleConnect = async (integration: Integration) => {
-        if (integration.connectUrl) {
-            try {
-                const response = await fetch(integration.connectUrl);
-                const data = await response.json();
-
-                if (data.authUrl) {
-                    window.location.href = data.authUrl;
-                } else if (data.error) {
-                    setNotification({ type: 'error', message: data.error });
-                }
-            } catch (error) {
-                setNotification({ type: 'error', message: 'Erro ao conectar integração' });
+            if (data.authUrl) {
+                window.location.href = data.authUrl;
+            } else if (data.error) {
+                setNotification({ type: 'error', message: data.error });
             }
+        } catch (error) {
+            setNotification({ type: 'error', message: 'Erro ao conectar integração' });
         }
     };
 
-    const handleDisconnect = async (integrationId: string) => {
+    const handleDisconnectGoogle = async () => {
         try {
-            const res = await fetch(`/api/integrations/${integrationId}/disconnect`, { method: 'POST' });
+            const res = await fetch('/api/integrations/google/disconnect', { method: 'POST' });
             if (res.ok) {
-                setNotification({ type: 'success', message: 'Integração desconectada.' });
+                setNotification({ type: 'success', message: 'Google desconectado.' });
                 setGoogleStatus({ connected: false });
             } else {
                 setNotification({ type: 'error', message: 'Erro ao desconectar.' });
@@ -154,6 +151,66 @@ function IntegrationsContent() {
             setNotification({ type: 'error', message: 'Erro ao desconectar integração.' });
         }
     };
+
+    // Handler para criar instância WhatsApp principal
+    async function handleCreateWhatsAppInstance() {
+        try {
+            setWhatsappLoading(true);
+
+            const res = await fetch('/api/whatsapp/instance', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    connectionType: 'qr_code',
+                    isMain: true, // Indica que é a instância principal
+                }),
+            });
+
+            const data = await res.json();
+
+            if (data.success) {
+                setShowQRCode(true);
+                await fetchMainWhatsAppInstance();
+            } else {
+                setNotification({ type: 'error', message: data.error || 'Erro ao criar instância' });
+            }
+        } catch (error) {
+            console.error('Erro ao criar instância WhatsApp:', error);
+            setNotification({ type: 'error', message: 'Erro ao criar instância WhatsApp' });
+        } finally {
+            setWhatsappLoading(false);
+        }
+    }
+
+    // Handler para desconectar WhatsApp
+    async function handleDisconnectWhatsApp() {
+        if (!whatsappInstance?.id) return;
+
+        if (!confirm('Deseja realmente desconectar o WhatsApp?')) return;
+
+        try {
+            const res = await fetch(`/api/whatsapp/instance/${whatsappInstance.id}/status`, {
+                method: 'POST',
+            });
+
+            if (res.ok) {
+                setShowQRCode(false);
+                setNotification({ type: 'success', message: 'WhatsApp desconectado.' });
+                await fetchMainWhatsAppInstance();
+            } else {
+                setNotification({ type: 'error', message: 'Erro ao desconectar' });
+            }
+        } catch (error) {
+            console.error('Erro ao desconectar:', error);
+        }
+    }
+
+    // Callback quando WhatsApp conecta
+    function handleWhatsAppConnected(info: { phoneNumber: string; profileName: string }) {
+        setShowQRCode(false);
+        setNotification({ type: 'success', message: `WhatsApp conectado: ${info.profileName}` });
+        fetchMainWhatsAppInstance();
+    }
 
     return (
         <PageWrapper>
@@ -175,109 +232,185 @@ function IntegrationsContent() {
             )}
 
             <div className="grid gap-6 lg:grid-cols-2">
-                {integrations.map((integration) => (
-                    <Card key={integration.id}>
-                        <CardHeader>
-                            <div className="flex items-start justify-between">
-                                <div className="flex items-center gap-4">
-                                    <div
-                                        className={`flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br ${integration.color}`}
-                                    >
-                                        <integration.icon className="h-7 w-7 text-white" />
-                                    </div>
-                                    <div>
-                                        <CardTitle>{integration.name}</CardTitle>
-                                        <p className="text-sm text-slate-500">
-                                            {integration.description}
-                                        </p>
-                                    </div>
+                {/* Google Integration */}
+                <Card>
+                    <CardHeader>
+                        <div className="flex items-start justify-between">
+                            <div className="flex items-center gap-4">
+                                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-red-500 to-yellow-500">
+                                    <Chrome className="h-7 w-7 text-white" />
                                 </div>
-                                <Badge
-                                    variant={integration.connected ? 'success' : 'secondary'}
-                                >
-                                    {integration.connected ? 'Conectado' : 'Desconectado'}
-                                </Badge>
-                            </div>
-                        </CardHeader>
-                        <CardContent>
-                            {/* Connection Info */}
-                            {integration.connected && (
-                                <div className="mb-4 rounded-xl bg-slate-50 p-4">
-                                    <p className="text-sm text-slate-600">
-                                        {integration.email && (
-                                            <>
-                                                <span className="font-medium">Conta:</span>{' '}
-                                                {integration.email}
-                                            </>
-                                        )}
-                                        {integration.phone && (
-                                            <>
-                                                <span className="font-medium">Número:</span>{' '}
-                                                {integration.phone}
-                                            </>
-                                        )}
-                                    </p>
+                                <div>
+                                    <CardTitle>Google</CardTitle>
+                                    <p className="text-sm text-slate-500">Calendar e Sheets</p>
                                 </div>
-                            )}
-
-                            {/* Features */}
-                            <div className="mb-4 space-y-2">
-                                {integration.features.map((feature) => (
-                                    <div
-                                        key={feature.name}
-                                        className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2"
-                                    >
-                                        <span className="text-sm text-slate-700">
-                                            {feature.name}
-                                        </span>
-                                        {feature.enabled ? (
-                                            <Check className="h-4 w-4 text-emerald-500" />
-                                        ) : (
-                                            <X className="h-4 w-4 text-slate-300" />
-                                        )}
-                                    </div>
-                                ))}
                             </div>
+                            <Badge variant={googleStatus?.connected ? 'success' : 'secondary'}>
+                                {googleStatus?.connected ? 'Conectado' : 'Desconectado'}
+                            </Badge>
+                        </div>
+                    </CardHeader>
+                    <CardContent>
+                        {googleStatus?.connected && (
+                            <div className="mb-4 rounded-xl bg-slate-50 p-4">
+                                <p className="text-sm text-slate-600">
+                                    <span className="font-medium">Conta:</span> {googleStatus.email}
+                                </p>
+                            </div>
+                        )}
 
-                            {/* Actions */}
-                            <div className="flex gap-2">
-                                {integration.connected ? (
-                                    <>
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            className="flex-1"
-                                            onClick={() => handleConnect(integration)}
-                                        >
-                                            <RefreshCw className="h-4 w-4" />
-                                            Reconectar
-                                        </Button>
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            className="text-red-600 hover:bg-red-50 hover:border-red-200"
-                                            onClick={() => handleDisconnect(integration.id)}
-                                        >
-                                            <X className="h-4 w-4" />
-                                            Desconectar
-                                        </Button>
-                                    </>
-                                ) : (
-                                    <Button
-                                        variant="primary"
-                                        size="sm"
-                                        className="w-full"
-                                        onClick={() => handleConnect(integration)}
-                                        disabled={loading}
-                                    >
-                                        <ExternalLink className="h-4 w-4" />
-                                        {loading ? 'Carregando...' : `Conectar ${integration.name}`}
+                        <div className="mb-4 space-y-2">
+                            <div className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2">
+                                <span className="text-sm text-slate-700">Google Calendar</span>
+                                <Check className="h-4 w-4 text-emerald-500" />
+                            </div>
+                            <div className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2">
+                                <span className="text-sm text-slate-700">Google Sheets</span>
+                                <Check className="h-4 w-4 text-emerald-500" />
+                            </div>
+                        </div>
+
+                        <div className="flex gap-2">
+                            {googleStatus?.connected ? (
+                                <>
+                                    <Button variant="outline" size="sm" className="flex-1" onClick={handleConnectGoogle}>
+                                        <RefreshCw className="h-4 w-4" />
+                                        Reconectar
                                     </Button>
-                                )}
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="text-red-600 hover:bg-red-50 hover:border-red-200"
+                                        onClick={handleDisconnectGoogle}
+                                    >
+                                        <X className="h-4 w-4" />
+                                        Desconectar
+                                    </Button>
+                                </>
+                            ) : (
+                                <Button variant="primary" size="sm" className="w-full" onClick={handleConnectGoogle} disabled={loading}>
+                                    <ExternalLink className="h-4 w-4" />
+                                    {loading ? 'Carregando...' : 'Conectar Google'}
+                                </Button>
+                            )}
+                        </div>
+                    </CardContent>
+                </Card>
+
+                {/* WhatsApp Integration */}
+                <Card>
+                    <CardHeader>
+                        <div className="flex items-start justify-between">
+                            <div className="flex items-center gap-4">
+                                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-green-500 to-emerald-500">
+                                    <MessageCircle className="h-7 w-7 text-white" />
+                                </div>
+                                <div>
+                                    <CardTitle>WhatsApp Business</CardTitle>
+                                    <p className="text-sm text-slate-500">Conexão Principal</p>
+                                </div>
                             </div>
-                        </CardContent>
-                    </Card>
-                ))}
+                            {whatsappLoading ? (
+                                <Badge variant="secondary">
+                                    <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                    Carregando
+                                </Badge>
+                            ) : whatsappInstance?.status === 'connected' ? (
+                                <Badge variant="success">
+                                    <Wifi className="h-3 w-3 mr-1" />
+                                    Conectado
+                                </Badge>
+                            ) : whatsappInstance?.status === 'connecting' ? (
+                                <Badge variant="secondary">
+                                    <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                    Conectando
+                                </Badge>
+                            ) : (
+                                <Badge variant="secondary">
+                                    <WifiOff className="h-3 w-3 mr-1" />
+                                    Desconectado
+                                </Badge>
+                            )}
+                        </div>
+                    </CardHeader>
+                    <CardContent>
+                        {/* Se já está conectado */}
+                        {whatsappInstance?.status === 'connected' && (
+                            <div className="mb-4 rounded-xl bg-green-50 p-4">
+                                <p className="text-sm text-green-800">
+                                    <span className="font-medium">Número:</span> +{whatsappInstance.phoneNumber}
+                                </p>
+                                <p className="text-sm text-green-700">
+                                    <span className="font-medium">Perfil:</span> {whatsappInstance.profileName}
+                                </p>
+                            </div>
+                        )}
+
+                        {/* Se está mostrando QR Code */}
+                        {showQRCode && whatsappInstance && (
+                            <div className="mb-4">
+                                <WhatsAppQRCode
+                                    instanceId={whatsappInstance.id}
+                                    onConnected={handleWhatsAppConnected}
+                                    onDisconnected={() => fetchMainWhatsAppInstance()}
+                                />
+                            </div>
+                        )}
+
+                        {/* Features */}
+                        {!showQRCode && (
+                            <div className="mb-4 space-y-2">
+                                <div className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2">
+                                    <span className="text-sm text-slate-700">Enviar Mensagens</span>
+                                    <Check className="h-4 w-4 text-emerald-500" />
+                                </div>
+                                <div className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2">
+                                    <span className="text-sm text-slate-700">Receber Mensagens</span>
+                                    <Check className="h-4 w-4 text-emerald-500" />
+                                </div>
+                                <div className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2">
+                                    <span className="text-sm text-slate-700">Conexão via QR Code</span>
+                                    <Check className="h-4 w-4 text-emerald-500" />
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="flex gap-2">
+                            {whatsappInstance?.status === 'connected' ? (
+                                <>
+                                    <Button variant="outline" size="sm" className="flex-1" onClick={handleCreateWhatsAppInstance}>
+                                        <RefreshCw className="h-4 w-4" />
+                                        Reconectar
+                                    </Button>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="text-red-600 hover:bg-red-50 hover:border-red-200"
+                                        onClick={handleDisconnectWhatsApp}
+                                    >
+                                        <X className="h-4 w-4" />
+                                        Desconectar
+                                    </Button>
+                                </>
+                            ) : showQRCode ? (
+                                <Button variant="outline" size="sm" className="w-full" onClick={() => setShowQRCode(false)}>
+                                    Cancelar
+                                </Button>
+                            ) : (
+                                <Button
+                                    variant="primary"
+                                    size="sm"
+                                    className="w-full"
+                                    onClick={handleCreateWhatsAppInstance}
+                                    disabled={whatsappLoading}
+                                >
+                                    <QrCode className="h-4 w-4" />
+                                    {whatsappLoading ? 'Carregando...' : 'Conectar via QR Code'}
+                                </Button>
+                            )}
+                        </div>
+                    </CardContent>
+                </Card>
             </div>
 
             {/* Help Section */}
@@ -285,16 +418,13 @@ function IntegrationsContent() {
                 <Card className="bg-slate-50 border-slate-200">
                     <CardContent className="p-6">
                         <h3 className="font-semibold text-slate-900 mb-2">
-                            Como configurar as integrações?
+                            Como funcionam as integrações principais?
                         </h3>
                         <div className="text-sm text-slate-600 space-y-2 mb-4">
-                            <p><strong>Google Calendar:</strong> Clique em "Conectar" e autorize o acesso. O agente poderá listar horários e criar eventos.</p>
-                            <p><strong>WhatsApp:</strong> Configure suas credenciais Meta no arquivo .env (WHATSAPP_TOKEN, WHATSAPP_PHONE_ID).</p>
+                            <p><strong>Google:</strong> Clique em "Conectar" e autorize o acesso. Todos os agentes podem usar esta conta.</p>
+                            <p><strong>WhatsApp:</strong> Escaneie o QR Code com seu WhatsApp. Esta será a conexão padrão para seus agentes.</p>
+                            <p className="text-amber-600">💡 <strong>Dica:</strong> Você pode conectar contas específicas em cada agente, se preferir.</p>
                         </div>
-                        <Button variant="outline" size="sm">
-                            <ExternalLink className="h-4 w-4" />
-                            Ver Documentação
-                        </Button>
                     </CardContent>
                 </Card>
             </PageSection>

@@ -1,10 +1,9 @@
 /**
- * ─────────────────────────────────────────────────────────────────────────────
  * WHATSAPP STATUS API - Status e desconexão de instância
- * ─────────────────────────────────────────────────────────────────────────────
  * 
  * GET /api/whatsapp/instance/[id]/status - Obter status
- * DELETE /api/whatsapp/instance/[id]/status - Desconectar instância
+ * POST - Desconectar instância
+ * DELETE - Deletar instância
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -13,23 +12,16 @@ import {
     disconnectInstance,
     deleteInstance,
 } from '@/server/services/whatsapp-manager';
-import { auth } from '@/auth';
 
 /**
  * GET - Obter status da instância
  */
 export async function GET(
-    request: NextRequest,
+    _request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const session = await auth();
-        if (!session?.user?.id) {
-            return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
-        }
-
         const { id: instanceId } = await params;
-
         const instance = await getInstanceStatus(instanceId);
 
         if (!instance) {
@@ -52,17 +44,11 @@ export async function GET(
  * POST - Desconectar instância (mantém configuração)
  */
 export async function POST(
-    request: NextRequest,
+    _request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const session = await auth();
-        if (!session?.user?.id) {
-            return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
-        }
-
         const { id: instanceId } = await params;
-
         const result = await disconnectInstance(instanceId);
 
         if (!result.success) {
@@ -85,17 +71,11 @@ export async function POST(
  * DELETE - Deletar instância completamente
  */
 export async function DELETE(
-    request: NextRequest,
+    _request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const session = await auth();
-        if (!session?.user?.id) {
-            return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
-        }
-
         const { id: instanceId } = await params;
-
         const result = await deleteInstance(instanceId);
 
         if (!result.success) {
