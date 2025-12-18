@@ -52,12 +52,47 @@ export class StageMachine {
 
         if (!session) {
             // Sessão nova: busca primeiro estágio
-            const firstStage = await db.query.agentStages.findFirst({
+            let firstStage = await db.query.agentStages.findFirst({
                 where: eq(agentStages.agentId, agentId),
                 orderBy: asc(agentStages.order)
             });
 
-            if (!firstStage) throw new Error('Agente sem estágios configurados');
+            // Se não tem estágios, criar automaticamente
+            if (!firstStage) {
+                console.log(`[StageMachine] ⚠️ Agente ${agentId} sem estágios. Criando estágios padrão...`);
+
+                const defaultStages = [
+                    { name: 'Identificação', type: 'identify' as const, order: 0, instructions: 'Conhecer o lead. Pergunte nome e área de atuação. Se demonstrar interesse direto, pule para agendamento.', entryCondition: 'Início', requiredVariables: ['nome', 'area'] },
+                    { name: 'Entendimento', type: 'diagnosis' as const, order: 1, instructions: 'Entender a dor. Pergunte o que fez ele buscar uma solução. Se demonstrar interesse, ofereça agendamento.', entryCondition: 'Lead identificado', requiredVariables: ['desafio'] },
+                    { name: 'Qualificação', type: 'custom' as const, order: 2, instructions: 'Qualificar o lead. Pergunte UMA informação relevante sobre o contexto (volume de leads, equipe, etc).', entryCondition: 'Dor identificada', requiredVariables: [] },
+                    { name: 'Apresentação', type: 'custom' as const, order: 3, instructions: 'Conectar dor com solução. Mostre 1-2 benefícios e ofereça uma demonstração prática.', entryCondition: 'Lead qualificado', requiredVariables: [] },
+                    { name: 'Agendamento', type: 'schedule' as const, order: 4, instructions: 'Agendar reunião. Peça email e ofereça datas: dia DD/MM às HH:00. Nunca sábado ou domingo.', entryCondition: 'Lead interessado', requiredVariables: ['email', 'data_reuniao'] },
+                    { name: 'Confirmação', type: 'handoff' as const, order: 5, instructions: 'Confirmar agendamento e encerrar. Agradeça pela conversa.', entryCondition: 'Reunião agendada', requiredVariables: [] },
+                ];
+
+                await db.insert(agentStages).values(
+                    defaultStages.map(stage => ({
+                        agentId,
+                        name: stage.name,
+                        type: stage.type,
+                        order: stage.order,
+                        instructions: stage.instructions,
+                        entryCondition: stage.entryCondition,
+                        requiredVariables: stage.requiredVariables,
+                        isActive: true,
+                    }))
+                );
+
+                // Buscar novamente o primeiro estágio
+                firstStage = await db.query.agentStages.findFirst({
+                    where: eq(agentStages.agentId, agentId),
+                    orderBy: asc(agentStages.order)
+                });
+
+                console.log(`[StageMachine] ✅ Estágios criados para agente ${agentId}`);
+            }
+
+            if (!firstStage) throw new Error('Falha ao criar estágios padrão');
 
             const [newSession] = await db.insert(sessions).values({
                 threadId,

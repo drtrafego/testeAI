@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Header, PageWrapper, PageSection } from '@/components/layout';
-import { Card, CardContent, CardHeader, CardTitle, CardFooter, Button, Badge } from '@/components/ui';
+import { Card, CardContent, CardHeader, CardTitle, Button, Badge, Input, Label } from '@/components/ui';
 import {
     Chrome,
     MessageCircle,
@@ -17,7 +17,8 @@ import {
     Wifi,
     WifiOff,
     Loader2,
-    Trash2,
+    Key,
+    Phone,
 } from 'lucide-react';
 import { WhatsAppQRCode } from '@/components/integrations/WhatsAppQRCode';
 
@@ -29,13 +30,16 @@ import { WhatsAppQRCode } from '@/components/integrations/WhatsAppQRCode';
 
 interface WhatsAppInstanceInfo {
     id: string;
-    agentId: string;
+    userId?: string;
+    agentId?: string;
     connectionType: 'api_oficial' | 'qr_code';
     status: 'disconnected' | 'connecting' | 'connected' | 'error';
     phoneNumber?: string;
     profileName?: string;
     errorMessage?: string;
 }
+
+type ConnectionMode = 'qr_code' | 'api_oficial';
 
 function IntegrationsContent() {
     const searchParams = useSearchParams();
@@ -47,6 +51,16 @@ function IntegrationsContent() {
     const [whatsappInstance, setWhatsappInstance] = useState<WhatsAppInstanceInfo | null>(null);
     const [whatsappLoading, setWhatsappLoading] = useState(true);
     const [showQRCode, setShowQRCode] = useState(false);
+
+    // Tipo de conexão selecionado
+    const [selectedConnectionMode, setSelectedConnectionMode] = useState<ConnectionMode>('qr_code');
+
+    // Credenciais API Oficial
+    const [apiCredentials, setApiCredentials] = useState({
+        accessToken: '',
+        phoneNumberId: '',
+    });
+    const [showApiForm, setShowApiForm] = useState(false);
 
     // Buscar status real das integrações
     useEffect(() => {
@@ -212,6 +226,46 @@ function IntegrationsContent() {
         fetchMainWhatsAppInstance();
     }
 
+    // Handler para criar instância via API Oficial
+    async function handleCreateAPIOficialInstance() {
+        if (!apiCredentials.accessToken || !apiCredentials.phoneNumberId) {
+            setNotification({ type: 'error', message: 'Preencha todos os campos obrigatórios' });
+            return;
+        }
+
+        try {
+            setWhatsappLoading(true);
+
+            const res = await fetch('/api/whatsapp/instance', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    connectionType: 'api_oficial',
+                    isMain: true,
+                    credentials: {
+                        token: apiCredentials.accessToken,
+                        phoneNumberId: apiCredentials.phoneNumberId,
+                    },
+                }),
+            });
+
+            const data = await res.json();
+
+            if (data.success) {
+                setShowApiForm(false);
+                setNotification({ type: 'success', message: 'API Oficial configurada com sucesso!' });
+                await fetchMainWhatsAppInstance();
+            } else {
+                setNotification({ type: 'error', message: data.error || 'Erro ao configurar API Oficial' });
+            }
+        } catch (error) {
+            console.error('Erro ao configurar API Oficial:', error);
+            setNotification({ type: 'error', message: 'Erro ao configurar API Oficial' });
+        } finally {
+            setWhatsappLoading(false);
+        }
+    }
+
     return (
         <PageWrapper>
             {/* Notification */}
@@ -338,11 +392,18 @@ function IntegrationsContent() {
                         {whatsappInstance?.status === 'connected' && (
                             <div className="mb-4 rounded-xl bg-green-50 p-4">
                                 <p className="text-sm text-green-800">
-                                    <span className="font-medium">Número:</span> +{whatsappInstance.phoneNumber}
+                                    <span className="font-medium">Tipo:</span> {whatsappInstance.connectionType === 'qr_code' ? 'QR Code' : 'API Oficial'}
                                 </p>
-                                <p className="text-sm text-green-700">
-                                    <span className="font-medium">Perfil:</span> {whatsappInstance.profileName}
-                                </p>
+                                {whatsappInstance.phoneNumber && (
+                                    <p className="text-sm text-green-800">
+                                        <span className="font-medium">Número:</span> +{whatsappInstance.phoneNumber}
+                                    </p>
+                                )}
+                                {whatsappInstance.profileName && (
+                                    <p className="text-sm text-green-700">
+                                        <span className="font-medium">Perfil:</span> {whatsappInstance.profileName}
+                                    </p>
+                                )}
                             </div>
                         )}
 
@@ -357,24 +418,106 @@ function IntegrationsContent() {
                             </div>
                         )}
 
-                        {/* Features */}
-                        {!showQRCode && (
-                            <div className="mb-4 space-y-2">
-                                <div className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2">
-                                    <span className="text-sm text-slate-700">Enviar Mensagens</span>
-                                    <Check className="h-4 w-4 text-emerald-500" />
+                        {/* Formulário API Oficial */}
+                        {showApiForm && (
+                            <div className="mb-4 space-y-4">
+                                <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
+                                    <h4 className="font-medium text-blue-900 mb-3 flex items-center gap-2">
+                                        <Key className="h-4 w-4" />
+                                        Credenciais Meta WhatsApp Business API
+                                    </h4>
+                                    <div className="space-y-3">
+                                        <div>
+                                            <Label htmlFor="accessToken" className="text-sm text-blue-800">Access Token *</Label>
+                                            <Input
+                                                id="accessToken"
+                                                type="password"
+                                                placeholder="EAAxxxxxxx..."
+                                                value={apiCredentials.accessToken}
+                                                onChange={(e) => setApiCredentials(prev => ({ ...prev, accessToken: e.target.value }))}
+                                                className="mt-1"
+                                            />
+                                        </div>
+                                        <div>
+                                            <Label htmlFor="phoneNumberId" className="text-sm text-blue-800">Phone Number ID *</Label>
+                                            <Input
+                                                id="phoneNumberId"
+                                                type="text"
+                                                placeholder="1234567890..."
+                                                value={apiCredentials.phoneNumberId}
+                                                onChange={(e) => setApiCredentials(prev => ({ ...prev, phoneNumberId: e.target.value }))}
+                                                className="mt-1"
+                                            />
+                                        </div>
+                                    </div>
+                                    <p className="text-xs text-blue-600 mt-3">
+                                        Obtenha essas credenciais em <a href="https://developers.facebook.com" target="_blank" rel="noopener noreferrer" className="underline">developers.facebook.com</a>
+                                    </p>
                                 </div>
-                                <div className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2">
-                                    <span className="text-sm text-slate-700">Receber Mensagens</span>
-                                    <Check className="h-4 w-4 text-emerald-500" />
-                                </div>
-                                <div className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2">
-                                    <span className="text-sm text-slate-700">Conexão via QR Code</span>
-                                    <Check className="h-4 w-4 text-emerald-500" />
+                                <div className="flex gap-2">
+                                    <Button
+                                        variant="primary"
+                                        size="sm"
+                                        className="flex-1"
+                                        onClick={handleCreateAPIOficialInstance}
+                                        disabled={whatsappLoading}
+                                    >
+                                        {whatsappLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                                        Salvar Credenciais
+                                    </Button>
+                                    <Button variant="outline" size="sm" onClick={() => setShowApiForm(false)}>
+                                        Cancelar
+                                    </Button>
                                 </div>
                             </div>
                         )}
 
+                        {/* Seletor de Tipo de Conexão (quando não está conectado nem mostrando formulários) */}
+                        {!showQRCode && !showApiForm && whatsappInstance?.status !== 'connected' && (
+                            <div className="mb-4 space-y-3">
+                                <p className="text-sm text-slate-600 mb-3">Escolha o tipo de conexão:</p>
+
+                                {/* Opção QR Code */}
+                                <button
+                                    onClick={() => setSelectedConnectionMode('qr_code')}
+                                    className={`w-full p-4 rounded-xl border-2 text-left transition-all ${selectedConnectionMode === 'qr_code'
+                                            ? 'border-green-500 bg-green-50'
+                                            : 'border-slate-200 hover:border-slate-300'
+                                        }`}
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <div className={`p-2 rounded-lg ${selectedConnectionMode === 'qr_code' ? 'bg-green-500' : 'bg-slate-200'}`}>
+                                            <QrCode className={`h-5 w-5 ${selectedConnectionMode === 'qr_code' ? 'text-white' : 'text-slate-600'}`} />
+                                        </div>
+                                        <div>
+                                            <p className="font-medium text-slate-900">Conexão via QR Code</p>
+                                            <p className="text-xs text-slate-500">Escaneie com seu WhatsApp pessoal ou business</p>
+                                        </div>
+                                    </div>
+                                </button>
+
+                                {/* Opção API Oficial */}
+                                <button
+                                    onClick={() => setSelectedConnectionMode('api_oficial')}
+                                    className={`w-full p-4 rounded-xl border-2 text-left transition-all ${selectedConnectionMode === 'api_oficial'
+                                            ? 'border-blue-500 bg-blue-50'
+                                            : 'border-slate-200 hover:border-slate-300'
+                                        }`}
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <div className={`p-2 rounded-lg ${selectedConnectionMode === 'api_oficial' ? 'bg-blue-500' : 'bg-slate-200'}`}>
+                                            <Key className={`h-5 w-5 ${selectedConnectionMode === 'api_oficial' ? 'text-white' : 'text-slate-600'}`} />
+                                        </div>
+                                        <div>
+                                            <p className="font-medium text-slate-900">API Oficial Meta</p>
+                                            <p className="text-xs text-slate-500">Use credenciais da WhatsApp Business Cloud API</p>
+                                        </div>
+                                    </div>
+                                </button>
+                            </div>
+                        )}
+
+                        {/* Botões de Ação */}
                         <div className="flex gap-2">
                             {whatsappInstance?.status === 'connected' ? (
                                 <>
@@ -396,16 +539,31 @@ function IntegrationsContent() {
                                 <Button variant="outline" size="sm" className="w-full" onClick={() => setShowQRCode(false)}>
                                     Cancelar
                                 </Button>
-                            ) : (
+                            ) : showApiForm ? null : (
                                 <Button
                                     variant="primary"
                                     size="sm"
                                     className="w-full"
-                                    onClick={handleCreateWhatsAppInstance}
+                                    onClick={() => {
+                                        if (selectedConnectionMode === 'qr_code') {
+                                            handleCreateWhatsAppInstance();
+                                        } else {
+                                            setShowApiForm(true);
+                                        }
+                                    }}
                                     disabled={whatsappLoading}
                                 >
-                                    <QrCode className="h-4 w-4" />
-                                    {whatsappLoading ? 'Carregando...' : 'Conectar via QR Code'}
+                                    {selectedConnectionMode === 'qr_code' ? (
+                                        <>
+                                            <QrCode className="h-4 w-4" />
+                                            {whatsappLoading ? 'Carregando...' : 'Gerar QR Code'}
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Key className="h-4 w-4" />
+                                            {whatsappLoading ? 'Carregando...' : 'Configurar API'}
+                                        </>
+                                    )}
                                 </Button>
                             )}
                         </div>
