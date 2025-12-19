@@ -375,20 +375,23 @@ export class StageMachine {
         );
 
         // 10. Atualizar sessão se necessário
+        // INCLUIR extractedFromMessage para garantir que data/hora via regex sejam salvas
+        const allExtractedVars = { ...extractedFromMessage, ...analysisResult.extractedVars };
+
         if (analysisResult.shouldAdvance && analysisResult.nextStageId) {
             await db.update(sessions)
                 .set({
                     currentStageId: analysisResult.nextStageId,
                     previousStageId: currentStage.id,
                     stageHistory: [...(session.stageHistory as string[]), analysisResult.nextStageId],
-                    variables: { ...(session.variables as object), ...analysisResult.extractedVars }
+                    variables: { ...(session.variables as object), ...allExtractedVars }
                 })
                 .where(eq(sessions.id, session.id));
-        } else if (Object.keys(analysisResult.extractedVars).length > 0) {
+        } else if (Object.keys(allExtractedVars).length > 0) {
             // Só atualizar variáveis
             await db.update(sessions)
                 .set({
-                    variables: { ...(session.variables as object), ...analysisResult.extractedVars }
+                    variables: { ...(session.variables as object), ...allExtractedVars }
                 })
                 .where(eq(sessions.id, session.id));
         }
