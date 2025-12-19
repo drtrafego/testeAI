@@ -1,8 +1,9 @@
 import crypto from 'crypto';
 
 const ALGORITHM = 'aes-256-gcm';
-const SECRET_KEY = process.env.ENCRYPTION_KEY || 'default-secret-key-must-be-32-chars!!';
-// Em produção, ENCRYPTION_KEY deve ter 32 caracteres exatos
+const RAW_KEY = process.env.ENCRYPTION_KEY || 'default-encryption-key-for-dev';
+// Derivar chave de 32 bytes de qualquer tamanho de input usando SHA-256
+const SECRET_KEY = crypto.createHash('sha256').update(RAW_KEY).digest();
 
 export function encryptCredential(text: string): string {
     const iv = crypto.randomBytes(16);
