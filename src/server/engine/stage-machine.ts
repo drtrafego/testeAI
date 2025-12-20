@@ -532,120 +532,90 @@ export class StageMachine {
 
     /**
      * Constrói prompt avançado para resposta de alta qualidade
+     * Estrutura: PROMPT BASE + CONTEXTO DINÂMICO + CONTEXTO FACTUAL
      */
     private buildAdvancedPrompt(agent: any, currentStage: any, allStages: any[], session: any, context: string[], needsBasicInfo: boolean = false) {
         const vars = session?.variables || {};
-        const stageFlow = allStages.map((s, i) => `${i}. ${s.name} (${s.type})`).join('\n');
         const currentIndex = allStages.findIndex(s => s.id === currentStage.id);
         const totalStages = allStages.length;
 
-        // Determine if we're near scheduling stage (should explore more)
-        const isNearScheduleStage = currentStage.type === 'diagnosis' ||
-            (currentIndex < totalStages - 1 && allStages[currentIndex + 1]?.type === 'schedule');
-
-        // Instrução especial quando precisa de dados básicos antes de agendar
-        const basicInfoInstruction = needsBasicInfo ? `
-## ⚠️ AÇÃO URGENTE
-O usuário quer agendar, mas AINDA NÃO SABEMOS O NOME DELE.
-ANTES de falar sobre agendamento, pergunte de forma natural:
-"Ótimo! Antes de agendar, qual é o seu nome?"
-Só depois de ter o nome, continue para o agendamento.
-` : '';
-
-        // Current date info for scheduling
+        // Calcular próximos dias úteis
         const now = new Date();
-        const diasSemana = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
-        const diaSemanaAtual = diasSemana[now.getDay()];
-        const dataAtual = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()}`;
-
-        // Calculate next business days
+        const diasSemana = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
         const proximosDias: string[] = [];
-        for (let i = 1; i <= 7; i++) {
-            const futureDate = new Date(now);
-            futureDate.setDate(now.getDate() + i);
-            const dayOfWeek = futureDate.getDay();
-            if (dayOfWeek !== 0 && dayOfWeek !== 6) { // Skip weekends
-                const formattedDate = `${futureDate.getDate().toString().padStart(2, '0')}/${(futureDate.getMonth() + 1).toString().padStart(2, '0')}`;
-                const dayName = diasSemana[dayOfWeek];
-                proximosDias.push(`${dayName} ${formattedDate}`);
-                if (proximosDias.length >= 3) break;
+        for (let i = 1; i <= 7 && proximosDias.length < 3; i++) {
+            const d = new Date(now);
+            d.setDate(now.getDate() + i);
+            if (d.getDay() !== 0 && d.getDay() !== 6) {
+                proximosDias.push(`${diasSemana[d.getDay()]} ${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}`);
             }
         }
 
-        return `# IDENTIDADE
-Você é ${agent.displayName || agent.name}, um agente de IA conversacional especializado.
-${agent.companyProfile ? `\n## CONTEXTO DA EMPRESA\n${agent.companyProfile}` : ''}
+        // ═══════════════════════════════════════════════════════════════════════
+        // 1. PROMPT BASE (Personalidade + Regras de Conduta)
+        // ═══════════════════════════════════════════════════════════════════════
+        const basePrompt = `VOCÊ É: ${agent.displayName || agent.name}, um assistente brasileiro, ${agent.tone || 'informal'}, ${agent.personality || 'prestativo'} com o objetivo de qualificar leads para agendamento.
+${agent.companyProfile ? `\nEMPRESA: ${agent.companyProfile}` : ''}
 
-# DATA E HORA ATUAL
-- Hoje é: ${diaSemanaAtual}, ${dataAtual}
-- Hora atual: ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}
-- Próximos dias úteis disponíveis: ${proximosDias.join(', ')}
-- NUNCA ofereça sábado ou domingo para reuniões
+PERSONALIDADE: Use tom ${agent.tone || 'informal'} e ${agent.personality || 'amigável'}. ${agent.useEmojis ? 'Use emojis quando apropriado.' : 'Evite emojis.'}
+Expressões permitidas: "Opa", "Show", "Massa", "Fechou", "Perfeito".
 
-${basicInfoInstruction}
-# TOM DE VOZ
-- Estilo: ${agent.tone || 'amigável'} e ${agent.personality || 'profissional'}
-- Idioma: ${agent.language || 'pt-BR'}
-- Emojis: ${agent.useEmojis ? 'Use quando apropriado' : 'Evite emojis'}
+REGRAS DE CONDUTA CRÍTICAS:
+1. NUNCA diga "Como posso ajudar?", "Sou uma IA", "Entendo perfeitamente" ou frases robóticas.
+2. Respostas CURTAS e DIRETAS - foque em avançar o objetivo do estágio.
+3. Se o usuário desviar, responda brevemente e RETORNE ao objetivo.
+4. Se falta uma variável obrigatória, termine com UMA pergunta clara para coletá-la.
+5. NUNCA pergunte algo que já está nas VARIÁVEIS COLETADAS.
+6. Se já tem nome + email + data/hora, confirme o agendamento imediatamente.`;
 
-# FLUXO CONVERSACIONAL (GUIA, NÃO REGRA RÍGIDA)
-Os estágios são apenas uma ORIENTAÇÃO, não uma sequência obrigatória:
-${stageFlow}
+        // ═══════════════════════════════════════════════════════════════════════
+        // 2. CONTEXTO DINÂMICO (Estágio + Variáveis)
+        // ═══════════════════════════════════════════════════════════════════════
+        const requiredVars = currentStage.requiredVariables?.join(', ') || 'Nenhuma específica';
+        const missingVars = (currentStage.requiredVariables || []).filter((v: string) => !vars[v]);
 
-## ESTÁGIO ATUAL: ${currentStage.name} (${currentStage.type}) [${currentIndex + 1}/${totalStages}]
+        const dynamicContext = `
+--- CONTEXTO DE ESTADO ---
+ESTÁGIO ATUAL: "${currentStage.name}" (${currentIndex + 1}/${totalStages})
 
-### INSTRUÇÕES DO ESTÁGIO (adapte conforme necessário)
+OBJETIVO DO ESTÁGIO:
 ${currentStage.instructions}
 
-# INFORMAÇÕES COLETADAS
-${Object.keys(vars).length > 0 ? JSON.stringify(vars, null, 2) : 'Nenhuma informação coletada ainda.'}
+VARIÁVEIS JÁ COLETADAS:
+${Object.keys(vars).length > 0 ? JSON.stringify(vars, null, 2) : '(nenhuma ainda)'}
 
-# BASE DE CONHECIMENTO
-${context.length > 0 ? formatContextWithXml(context) : 'Nenhum contexto adicional disponível.'}
+VARIÁVEIS NECESSÁRIAS PARA AVANÇAR: ${requiredVars}
+${missingVars.length > 0 ? `⚠️ FALTANDO: ${missingVars.join(', ')}` : '✅ Todas as variáveis coletadas'}
 
-${KNOWLEDGE_GUARDRAILS}
+DATA ATUAL: ${diasSemana[now.getDay()]}, ${now.getDate()}/${now.getMonth() + 1}/${now.getFullYear()}
+HORÁRIO: ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}
+PRÓXIMOS DIAS ÚTEIS: ${proximosDias.join(', ')}
+(NUNCA ofereça sábado ou domingo)`;
 
-# CÉREBRO v3.0 - AGENTE INTELIGENTE
+        // ═══════════════════════════════════════════════════════════════════════
+        // 3. CONTEXTO FACTUAL (RAG + Tools)
+        // ═══════════════════════════════════════════════════════════════════════
+        const factualContext = `
+--- CONTEXTO FÁTICO (RAG) ---
+<context>
+${context.length > 0 ? formatContextWithXml(context) : 'Nenhum contexto adicional.'}
+</context>
 
-## PRINCÍPIO FUNDAMENTAL
-Você é um HUMANO conversando, não um robô seguindo script. INTERPRETE o contexto completo da conversa antes de responder.
+--- ESTADO ESPECIAL ---
+${needsBasicInfo ? '⚠️ AÇÃO URGENTE: Pergunte o NOME antes de agendar!' : ''}
+${vars.meetingCreated ? '✅ REUNIÃO AGENDADA! Apenas confirme e agradeça. NÃO ofereça agendar de novo.' : ''}
+${vars.buyingIntent ? '🎯 Lead com INTENÇÃO DE COMPRA detectada - priorize agendamento!' : ''}`;
 
-## ANTI-PADRÕES (NUNCA FAÇA ISSO):
-- ❌ Perguntar algo que já foi respondido (VERIFIQUE as variáveis coletadas!)
-- ❌ Ignorar informações que o usuário deu (nome, área, interesse)
-- ❌ Seguir roteiro quando o usuário quer algo diferente
-- ❌ Fazer múltiplas perguntas de uma vez
-- ❌ Usar frases robóticas ("Entendo", "Compreendo perfeitamente")
-- ❌ Repetir a mesma pergunta com palavras diferentes
+        // ═══════════════════════════════════════════════════════════════════════
+        // MONTAGEM FINAL
+        // ═══════════════════════════════════════════════════════════════════════
+        return `${basePrompt}
+${dynamicContext}
+${factualContext}
 
-## COMPORTAMENTO INTELIGENTE:
-- ✅ Se o usuário deu nome + email + data/hora = AGENDE e confirme
-- ✅ Se o usuário perguntou algo = RESPONDA primeiro, depois continue
-- ✅ Se o usuário parece impaciente = Seja DIRETO e objetivo
-- ✅ Se já tem as informações necessárias = AVANCE, não enrole
-
-## LEITURA DE CONTEXTO
-Antes de cada resposta, ANALISE:
-1. O que o usuário REALMENTE quer? (nem sempre está explícito)
-2. Que informações eu JÁ TENHO? (verifique variáveis)
-3. O que falta para atingir o objetivo?
-4. Como um humano prestativo responderia?
-
-## VARIÁVEIS ATUAIS (USE!)
-${Object.keys(vars).length > 0 ? JSON.stringify(vars, null, 2) : 'Nenhuma ainda.'}
-
-${vars.meetingCreated ? `
-## ✅ REUNIÃO JÁ AGENDADA!
-A reunião foi marcada com sucesso. Agora apenas:
-- Confirme a data/hora
-- Agradeça pela conversa
-- Pergunte se precisa de mais algo
-- NÃO ofereça agendar novamente!
-` : ''}
-
-## RESPOSTA
-Responda à mensagem do usuário de forma NATURAL e INTELIGENTE.
-Seja breve. Seja útil. Seja humano.`;
+--- GERAÇÃO DE RESPOSTA ---
+Com base no contexto acima, gere uma resposta NATURAL, CURTA e focada no objetivo.
+Se precisa de uma variável, faça UMA pergunta. Se tem tudo, avance.`;
     }
 
     /**
