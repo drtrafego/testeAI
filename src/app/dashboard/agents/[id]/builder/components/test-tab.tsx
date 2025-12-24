@@ -21,9 +21,15 @@ export function TestTab() {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [isTyping, setIsTyping] = useState(false); // Indica que está esperando mais input
     const [threadId, setThreadId] = useState<string | null>(null);
     const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
+
+    // Refs para debounce
+    const messageBufferRef = useRef<string[]>([]);
+    const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+    const DEBOUNCE_MS = 1500; // 1.5 segundos
 
     // Estado para variáveis e estágios
     const [threadState, setThreadState] = useState<{
@@ -69,12 +75,17 @@ export function TestTab() {
         }
     }, [messages, threadId, agent?.id, sessionStartTime]);
 
-    async function handleSend() {
-        if (!input.trim() || !agent) return;
+    // Processa mensagens acumuladas após o debounce
+    async function processBufferedMessages() {
+        if (!agent) return;
 
-        const userMsg = input.trim();
-        setInput('');
-        const newUserMessage: Message = { role: 'user', content: userMsg, timestamp: new Date() };
+        const bufferedContent = messageBufferRef.current.join('\n').trim();
+        messageBufferRef.current = [];
+        setIsTyping(false);
+
+        if (!bufferedContent) return;
+
+        const newUserMessage: Message = { role: 'user', content: bufferedContent, timestamp: new Date() };
         setMessages(prev => [...prev, newUserMessage]);
         setIsLoading(true);
 
@@ -87,7 +98,7 @@ export function TestTab() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    message: userMsg,
+                    message: bufferedContent,
                     agentId: agent.id,
                     threadId
                 })
@@ -116,6 +127,28 @@ export function TestTab() {
         } finally {
             setIsLoading(false);
         }
+    }
+
+    // Handler de envio com debounce - acumula mensagens por 1.5s
+    function handleSend() {
+        if (!input.trim() || !agent || isLoading) return;
+
+        const userMsg = input.trim();
+        setInput('');
+
+        // Adiciona ao buffer
+        messageBufferRef.current.push(userMsg);
+        setIsTyping(true);
+
+        // Limpa timer anterior
+        if (debounceTimerRef.current) {
+            clearTimeout(debounceTimerRef.current);
+        }
+
+        // Configura novo timer
+        debounceTimerRef.current = setTimeout(() => {
+            processBufferedMessages();
+        }, DEBOUNCE_MS);
     }
 
     // Buscar estado da thread (estágio atual + variáveis)
