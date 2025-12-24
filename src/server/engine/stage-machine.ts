@@ -416,9 +416,10 @@ export class StageMachine {
         }
 
         // 11. AGENDAMENTO AUTOMÁTICO: Se estamos no estágio de schedule e temos os dados
-        // Consolidar TODAS as variáveis: sessão + extração direta + análise IA
+        // CORREÇÃO CRÍTICA: Usar allExtractedVars que já foi salvo no banco, não session.variables que está desatualizado
+        const updatedSessionVars = { ...(session?.variables as object || {}), ...allExtractedVars };
         const finalVars: Record<string, any> = {
-            ...(session?.variables as object || {}),
+            ...updatedSessionVars,
             ...extractedFromMessage,  // CRÍTICO: incluir extração direta
             ...analysisResult.extractedVars
         };
