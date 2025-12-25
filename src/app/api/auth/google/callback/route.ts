@@ -96,10 +96,11 @@ export async function GET(request: NextRequest) {
         const userInfo = userInfoResponse.ok ? await userInfoResponse.json() : {};
 
         // Criptografar tokens (em produção, use AES-256-GCM)
+        // IMPORTANTE: expiryDate deve ser número (ms) para compatibilidade com googleapis
         const encryptedCredentials = JSON.stringify({
             accessToken: tokens.access_token,
             refreshToken: tokens.refresh_token,
-            expiresAt: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
+            expiryDate: Date.now() + tokens.expires_in * 1000, // Número em ms (não string ISO)
             email: userInfo.email,
         });
 

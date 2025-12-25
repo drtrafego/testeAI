@@ -362,6 +362,9 @@ export class StageMachine {
 
         // Lista de palavras que NÃO são nomes
         const blockedAsName = [
+            // Saudações (CRÍTICO: não extrair como nome!)
+            'olá', 'ola', 'oi', 'ei', 'hey', 'hello', 'hi',
+            'bom dia', 'boa tarde', 'boa noite', 'boa', 'bom',
             // Dias da semana (com e sem acento)
             'segunda', 'terça', 'terca', 'quarta', 'quinta', 'sexta', 'sábado', 'sabado', 'domingo',
             'segunda-feira', 'terça-feira', 'terca-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira',
@@ -373,6 +376,7 @@ export class StageMachine {
             'as', 'às', 'hora', 'horas', 'dia', 'dias',
             // Outras palavras comuns que não são nomes
             'pode', 'ser', 'que', 'para', 'com', 'está', 'esta', 'isso', 'isso mesmo',
+            'queria', 'quero', 'gostaria', 'preciso', 'tenho', 'obrigado', 'obrigada', 'valeu', 'vlw',
         ];
 
         const normalizedBlocked = blockedAsName.map(w => normalizeText(w));
@@ -600,9 +604,29 @@ export class StageMachine {
                         // Create meeting
                         const meetingTitle = `IA Agent - ${agent.name} + ${nome}`;
 
+                        // Construir descrição rica
+                        const eventDescription = [
+                            `📅 Reunião agendada via chat com IA`,
+                            ``,
+                            `👤 Nome: ${nome}`,
+                            `📧 Email: ${attendeeEmail}`,
+                            `🏢 Área: ${finalVars.area || 'Não informado'}`,
+                            `🎯 Desafio: ${finalVars.desafio || 'Não informado'}`,
+                            ``,
+                            `---`,
+                            `Agendado automaticamente pelo ${agent.name}`,
+                        ].join('\n');
+
+                        console.log(`[StageMachine] 📅 Criando evento:`, {
+                            titulo: meetingTitle,
+                            email: attendeeEmail,
+                            inicio: startDate.toISOString(),
+                            fim: endDate.toISOString()
+                        });
+
                         const result = await calendar.createEvent(calendarUserId, {
                             summary: meetingTitle,
-                            description: `Reunião agendada via chat.\nÁrea: ${finalVars.area || 'N/A'}\nDesafio: ${finalVars.desafio || 'N/A'}`,
+                            description: eventDescription,
                             start: startDate,
                             end: endDate,
                             attendeeEmail: attendeeEmail,
