@@ -341,6 +341,29 @@ export class StageMachine {
         }
 
         // ════════════════════════════════════════════════════════════════════
+        // NOVO: Detectar PERÍODO DO DIA sem número (manhã, tarde, noite)
+        // ════════════════════════════════════════════════════════════════════
+        if (!extractedFromMessage['horario_reuniao']) {
+            const periodoMatch = lowerMessage.match(/(?:pela\s+|à\s+|a\s+|de\s+)?(manhã|manha|tarde|noite)/i);
+            if (periodoMatch) {
+                const periodo = normalizeText(periodoMatch[1]);
+                let defaultHour = '14:00'; // Padrão: tarde
+
+                if (periodo === 'manha' || periodo === 'manhã') {
+                    defaultHour = '10:00';
+                } else if (periodo === 'tarde') {
+                    defaultHour = '14:00';
+                } else if (periodo === 'noite') {
+                    defaultHour = '19:00';
+                }
+
+                extractedFromMessage['horario_reuniao'] = defaultHour;
+                messageConsumedAsDateTime = true;
+                console.log(`[StageMachine] 🕐 Período '${periodoMatch[1]}' convertido para: ${defaultHour}`);
+            }
+        }
+
+        // ════════════════════════════════════════════════════════════════════
         // PASSO 3: EXTRAIR ÁREA/NICHO (pode coexistir com data/hora)
         // ════════════════════════════════════════════════════════════════════
 
