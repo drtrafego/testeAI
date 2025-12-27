@@ -10,7 +10,7 @@
  * Fluxo:
  * 1. Validação do Webhook (assinatura)
  * 2. Identificação/Criação da Thread
- * 3. Carregamento de Contexto (últimas mensagens)
+ * 3. Acumulação de mensagens rápidas (debounce)
  * 4. RAG - Injeção de Knowledge Base
  * 5. Processamento com IA (generateText + tools)
  * 6. Persistência da resposta
@@ -38,6 +38,145 @@ const DEFAULT_USER_ID = process.env.DEFAULT_USER_ID || '00000000-0000-0000-0000-
 
 // Instância do StageMachine (mesma usada pelo frontend)
 const stageMachine = new StageMachine();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SISTEMA DE BUFFER PARA MENSAGENS RÁPIDAS
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface MessageBuffer {
+    messages: string[];
+    lastMessageTime: number;
+    timeout: NodeJS.Timeout | null;
+    isProcessing: boolean;
+}
+
+// Buffer por número de telefone (in-memory, funciona para single server)
+const messageBuffers = new Map<string, MessageBuffer>();
+
+// Tempo de espera para acumular mensagens (ms)
+const MESSAGE_BUFFER_DELAY = 2250; // 2.25 segundos
+
+/**
+ * Processa mensagens acumuladas de um usuário
+ */
+async function processBufferedMessages(phoneNumber: string) {
+    const buffer = messageBuffers.get(phoneNumber);
+    if (!buffer || buffer.messages.length === 0 || buffer.isProcessing) {
+        return;
+    }
+
+    buffer.isProcessing = true;
+
+    // Juntar todas as mensagens em uma só
+    const combinedMessage = buffer.messages.join(' ');
+    const messages = [...buffer.messages]; // Cópia para log
+
+    // Limpar buffer
+    buffer.messages = [];
+    buffer.timeout = null;
+
+    console.log(`[Webhook] 📥 Processando ${messages.length} mensagens acumuladas de ${phoneNumber}: "${combinedMessage.substring(0, 100)}..."`);
+
+    try {
+        // 1. Buscar agente padrão
+        const agent = await getDefaultAgent(DEFAULT_USER_ID);
+
+        if (!agent) {
+            console.error('[Webhook] Nenhum agente configurado');
+            await sendWhatsAppMessage({
+                to: phoneNumber,
+                message: 'Desculpe, nosso assistente está temporariamente indisponível. Tente novamente mais tarde.',
+            });
+            buffer.isProcessing = false;
+            return;
+        }
+
+        // 2. Criar/buscar thread
+        const threadResult = await getOrCreateThreadAction(
+            DEFAULT_USER_ID,
+            agent.id,
+            phoneNumber,
+            phoneNumber // Nome será atualizado depois
+        );
+
+        if (!threadResult.success || !threadResult.thread) {
+            console.error('[Webhook] Erro ao criar thread');
+            buffer.isProcessing = false;
+            return;
+        }
+
+        const thread = threadResult.thread;
+
+        // 3. Processar com StageMachine (mensagem combinada)
+        const responseText = await stageMachine.processMessage(
+            DEFAULT_USER_ID,
+            agent.id,
+            thread.id,
+            combinedMessage
+        );
+
+        // 4. Enviar resposta para WhatsApp
+        const sendResult = await sendWhatsAppMessage({
+            to: phoneNumber,
+            message: responseText,
+        });
+
+        if (!sendResult.success) {
+            console.error('[Webhook] Erro ao enviar resposta:', sendResult.error);
+        }
+
+    } catch (error) {
+        console.error('[Webhook] Erro no processamento:', error);
+
+        // Tentar enviar mensagem de fallback
+        await sendWhatsAppMessage({
+            to: phoneNumber,
+            message: FALLBACK_RESPONSE,
+        });
+    } finally {
+        buffer.isProcessing = false;
+    }
+}
+
+/**
+ * Adiciona mensagem ao buffer e agenda processamento
+ */
+function addToBuffer(phoneNumber: string, text: string, messageId: string) {
+    let buffer = messageBuffers.get(phoneNumber);
+
+    if (!buffer) {
+        buffer = {
+            messages: [],
+            lastMessageTime: Date.now(),
+            timeout: null,
+            isProcessing: false
+        };
+        messageBuffers.set(phoneNumber, buffer);
+    }
+
+    // Adicionar mensagem ao buffer
+    buffer.messages.push(text);
+    buffer.lastMessageTime = Date.now();
+
+    // Marcar como lida
+    markMessageAsRead(messageId).catch(console.error);
+
+    // Cancelar timeout anterior
+    if (buffer.timeout) {
+        clearTimeout(buffer.timeout);
+    }
+
+    // Agendar processamento após delay
+    buffer.timeout = setTimeout(() => {
+        processBufferedMessages(phoneNumber);
+    }, MESSAGE_BUFFER_DELAY);
+
+    console.log(`[Webhook] 📨 Mensagem adicionada ao buffer de ${phoneNumber} (total: ${buffer.messages.length})`);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ENDPOINTS
+// ═══════════════════════════════════════════════════════════════════════════
 
 /**
  * GET - Verificação do Webhook (Challenge)
@@ -89,101 +228,17 @@ export async function POST(request: NextRequest) {
             return new NextResponse('OK', { status: 200 });
         }
 
-        // Processar cada mensagem (normalmente só uma por request)
+        // 3. Adicionar mensagens ao buffer (com debounce)
         for (const incoming of incomingMessages) {
-            await processIncomingMessage(incoming);
+            addToBuffer(incoming.from, incoming.text, incoming.messageId);
         }
 
-        console.log(`[Webhook] Processado em ${Date.now() - startTime}ms`);
+        console.log(`[Webhook] Mensagens recebidas em ${Date.now() - startTime}ms`);
         return new NextResponse('OK', { status: 200 });
 
     } catch (error) {
         console.error('[Webhook] Erro:', error);
         // Retornar 200 para evitar retry infinito da Meta
         return new NextResponse('OK', { status: 200 });
-    }
-}
-
-/**
- * Processa uma mensagem individual
- */
-async function processIncomingMessage(message: {
-    from: string;
-    fromName: string;
-    messageId: string;
-    timestamp: Date;
-    text: string;
-}) {
-    const { from, fromName, messageId, text } = message;
-
-    console.log(`[Webhook] Mensagem de ${from}: ${text.substring(0, 50)}...`);
-
-    try {
-        // 1. Buscar agente padrão
-        const agent = await getDefaultAgent(DEFAULT_USER_ID);
-
-        if (!agent) {
-            console.error('[Webhook] Nenhum agente configurado');
-            await sendWhatsAppMessage({
-                to: from,
-                message: 'Desculpe, nosso assistente está temporariamente indisponível. Tente novamente mais tarde.',
-            });
-            return;
-        }
-
-        // 2. Criar/buscar thread
-        const threadResult = await getOrCreateThreadAction(
-            DEFAULT_USER_ID,
-            agent.id,
-            from,
-            fromName
-        );
-
-        if (!threadResult.success || !threadResult.thread) {
-            console.error('[Webhook] Erro ao criar thread');
-            return;
-        }
-
-        const thread = threadResult.thread;
-
-        // 3. Marcar como lida
-        await markMessageAsRead(messageId);
-
-        // ═══════════════════════════════════════════════════════════════════
-        // IMPORTANTE: Usar StageMachine para processar a mensagem
-        // Isso garante mesma lógica do frontend:
-        // - Extração de variáveis (nome, email, data, hora)
-        // - Cérebro/RAG
-        // - Agendamento estruturado
-        // - Persistência automática de mensagens
-        // ═══════════════════════════════════════════════════════════════════
-
-        console.log(`[Webhook] Usando StageMachine para processar mensagem`);
-
-        const responseText = await stageMachine.processMessage(
-            DEFAULT_USER_ID,
-            agent.id,
-            thread.id,
-            text
-        );
-
-        // 4. Enviar resposta para WhatsApp
-        const sendResult = await sendWhatsAppMessage({
-            to: from,
-            message: responseText,
-        });
-
-        if (!sendResult.success) {
-            console.error('[Webhook] Erro ao enviar resposta:', sendResult.error);
-        }
-
-    } catch (error) {
-        console.error('[Webhook] Erro no processamento:', error);
-
-        // Tentar enviar mensagem de fallback
-        await sendWhatsAppMessage({
-            to: from,
-            message: FALLBACK_RESPONSE,
-        });
     }
 }

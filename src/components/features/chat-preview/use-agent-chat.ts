@@ -48,7 +48,7 @@ interface UseAgentChatReturn {
 }
 
 // Constantes
-const DEFAULT_DEBOUNCE_MS = 1500;
+const DEFAULT_DEBOUNCE_MS = 2250; // 2.25 segundos
 
 /**
  * Hook para gerenciar chat com agente

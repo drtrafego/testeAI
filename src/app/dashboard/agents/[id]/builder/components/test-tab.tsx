@@ -29,7 +29,7 @@ export function TestTab() {
     // Refs para debounce
     const messageBufferRef = useRef<string[]>([]);
     const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
-    const DEBOUNCE_MS = 1500; // 1.5 segundos
+    const DEBOUNCE_MS = 2250; // 2.25 segundos
 
     // Estado para variáveis e estágios
     const [threadState, setThreadState] = useState<{
