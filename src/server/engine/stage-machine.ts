@@ -686,6 +686,122 @@ export class StageMachine {
             }
         }
 
+        // ════════════════════════════════════════════════════════════════════
+        // EDIÇÃO/CANCELAMENTO DE REUNIÃO
+        // ════════════════════════════════════════════════════════════════════
+        if (finalVars.meetingCreated && finalVars.eventId) {
+            const lowerMsg = userMessage.toLowerCase();
+
+            // Detectar intenção de cancelar
+            const cancelPatterns = [
+                /cancelar?\s*(a\s+)?(reunião|agendamento|meeting)/i,
+                /desmarcar?\s*(a\s+)?(reunião|agendamento)/i,
+                /não\s*(quero|posso)\s*mais/i,
+                /apagar?\s*(a\s+)?(reunião|agendamento)/i,
+            ];
+
+            const isCancelIntent = cancelPatterns.some(p => p.test(lowerMsg));
+
+            if (isCancelIntent) {
+                try {
+                    console.log('[StageMachine] 🗑️ Detectada intenção de cancelar reunião:', finalVars.eventId);
+
+                    // Buscar integração
+                    const { integrations } = await import('@/db/schema');
+                    const anyGoogleIntegration = await db.query.integrations.findFirst({
+                        where: eq(integrations.provider, 'google')
+                    });
+
+                    if (anyGoogleIntegration) {
+                        await calendar.deleteEvent(anyGoogleIntegration.userId, finalVars.eventId);
+
+                        // Atualizar sessão
+                        await db.update(sessions)
+                            .set({
+                                variables: { ...finalVars, meetingCreated: false, eventId: null, eventLink: null }
+                            })
+                            .where(eq(sessions.id, session!.id));
+
+                        fullResponse += "\n\n✅ Sua reunião foi cancelada com sucesso!";
+                        console.log('[StageMachine] ✅ Reunião cancelada');
+                    }
+                } catch (cancelError) {
+                    console.error('[StageMachine] ❌ Erro ao cancelar:', cancelError);
+                    fullResponse += "\n\n⚠️ Desculpe, não consegui cancelar a reunião. Tente novamente.";
+                }
+            }
+
+            // Detectar intenção de remarcar/editar
+            const editPatterns = [
+                /remarcar?\s*(para)?/i,
+                /mudar?\s*(o\s+)?(horário|data|dia)/i,
+                /trocar?\s*(o\s+)?(horário|data|dia)/i,
+                /alterar?\s*(o\s+)?(horário|data|dia)/i,
+                /adiar?\s*(para)?/i,
+            ];
+
+            const isEditIntent = editPatterns.some(p => p.test(lowerMsg));
+
+            if (isEditIntent && (extractedFromMessage['data_reuniao'] || extractedFromMessage['horario_reuniao'])) {
+                try {
+                    console.log('[StageMachine] ✏️ Detectada intenção de editar reunião:', {
+                        eventId: finalVars.eventId,
+                        novaData: extractedFromMessage['data_reuniao'],
+                        novoHorario: extractedFromMessage['horario_reuniao']
+                    });
+
+                    // Buscar integração
+                    const { integrations } = await import('@/db/schema');
+                    const anyGoogleIntegration = await db.query.integrations.findFirst({
+                        where: eq(integrations.provider, 'google')
+                    });
+
+                    if (anyGoogleIntegration) {
+                        // Calcular nova data/hora
+                        const now = new Date();
+                        const dataStr = extractedFromMessage['data_reuniao'] || finalVars.data_reuniao;
+                        const horarioStr = extractedFromMessage['horario_reuniao'] || finalVars.horario_reuniao || '10:00';
+
+                        const dateMatch = String(dataStr).match(/(\d{1,2})\s*[\/\-]\s*(\d{1,2})/);
+                        const timeMatch = String(horarioStr).match(/(\d{1,2})(?::(\d{2}))?/);
+
+                        if (dateMatch && timeMatch) {
+                            const day = parseInt(dateMatch[1]);
+                            const month = parseInt(dateMatch[2]) - 1;
+                            const year = month < now.getMonth() ? now.getFullYear() + 1 : now.getFullYear();
+                            const hours = parseInt(timeMatch[1]);
+                            const minutes = timeMatch[2] ? parseInt(timeMatch[2]) : 0;
+
+                            const newStart = new Date(year, month, day, hours, minutes, 0);
+                            const newEnd = new Date(newStart.getTime() + 45 * 60 * 1000);
+
+                            await calendar.updateEvent(anyGoogleIntegration.userId, finalVars.eventId, {
+                                start: newStart,
+                                end: newEnd
+                            });
+
+                            // Atualizar variáveis na sessão
+                            await db.update(sessions)
+                                .set({
+                                    variables: {
+                                        ...finalVars,
+                                        data_reuniao: `${day.toString().padStart(2, '0')}/${(month + 1).toString().padStart(2, '0')}`,
+                                        horario_reuniao: horarioStr
+                                    }
+                                })
+                                .where(eq(sessions.id, session!.id));
+
+                            fullResponse += `\n\n✅ Sua reunião foi remarcada para ${day}/${month + 1} às ${hours}:${minutes.toString().padStart(2, '0')}!`;
+                            console.log('[StageMachine] ✅ Reunião remarcada');
+                        }
+                    }
+                } catch (editError) {
+                    console.error('[StageMachine] ❌ Erro ao editar:', editError);
+                    fullResponse += "\n\n⚠️ Desculpe, não consegui remarcar a reunião. Tente novamente.";
+                }
+            }
+        }
+
         return fullResponse;
     }
 
